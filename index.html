@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard Equipo - Control de Accesos</title>
+  <title>Dashboard BBVA FO Risk</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Librería oficial de Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body class="bg-slate-100 font-sans min-h-screen text-slate-800">
@@ -16,10 +17,11 @@
       <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-2xl">
         DB
       </div>
-      <h2 class="text-2xl font-bold mb-2 text-slate-800">Dashboard de Equipo</h2>
-      <p class="text-slate-500 text-sm mb-6">Inicia sesión con tu cuenta de Google corporativa</p>
+      <h2 class="text-2xl font-bold mb-2 text-slate-800">Dashboard BBVA FO Risk</h2>
+      <p class="text-slate-500 text-sm mb-6">Inicia sesión con tu cuenta corporativa para acceder</p>
       
-      <!-- ID de Cliente Google -->
+      <!-- BOTÓN GOOGLE OAUTH -->
+      <!-- Recuerda cambiar "TU_GOOGLE_CLIENT_ID_AQUI" por tu Client ID de Google Cloud -->
       <div id="g_id_onload"
         data-client_id="949020942947-bq1qa64aovf7rfkfuc9iqf0tdg4p0jl1.apps.googleusercontent.com"
         data-callback="handleCredentialResponse"
@@ -30,26 +32,30 @@
         <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with"></div>
       </div>
 
-      <div id="loginSpinner" class="hidden my-4 text-slate-500 text-sm">
-        Verificando permisos con Google Sheet...
+      <div id="loginSpinner" class="hidden my-4 text-slate-500 text-sm flex items-center justify-center gap-2">
+        <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>Verificando permisos en Google Sheet...</span>
       </div>
 
       <p id="loginError" class="text-red-500 text-sm mt-4 p-3 bg-red-50 rounded-lg hidden border border-red-200"></p>
     </div>
   </div>
 
-  <!-- DASHBOARD PRINCIPAL -->
+  <!-- DASHBOARD PRINCIPAL (Oculto hasta hacer login) -->
   <div id="dashboardSection" class="hidden flex h-screen overflow-hidden">
-    <!-- Sidebar -->
+    <!-- Sidebar / Menú Lateral -->
     <aside class="w-64 bg-slate-900 text-white flex flex-col justify-between p-4 shadow-lg">
       <div>
         <div class="flex items-center gap-3 mb-8 px-2">
-          <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold">D</div>
-          <h1 class="text-lg font-bold text-slate-100">Portal Equipo</h1>
+          <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold">R</div>
+          <h1 class="text-lg font-bold text-slate-100">FO Risk Portal</h1>
         </div>
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-3">Pestañas Permitidas</p>
         <nav id="navMenu" class="space-y-1">
-          <!-- Opciones dinámicas -->
+          <!-- Las pestañas se cargarán aquí dinámicamente -->
         </nav>
       </div>
       <div class="border-t border-slate-800 pt-4 px-2">
@@ -61,19 +67,19 @@
       </div>
     </aside>
 
-    <!-- Main Content -->
+    <!-- ÁREA DE CONTENIDO PRINCIPAL -->
     <main class="flex-1 overflow-y-auto p-8 bg-slate-50">
       <header class="flex justify-between items-center mb-6">
         <div>
           <h2 id="currentTabTitle" class="text-3xl font-bold text-slate-800">Cargando...</h2>
-          <p class="text-slate-500 text-sm">Sincronizado con Google Drive</p>
+          <p class="text-slate-500 text-sm">Sincronizado en tiempo real con Google Drive</p>
         </div>
-        <!-- Buscador -->
+        <!-- Buscador en tiempo real -->
         <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="Buscar en la tabla..." 
           class="hidden px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm shadow-sm focus:ring-2 focus:ring-blue-500 outline-none w-64">
       </header>
 
-      <!-- Panel KPIs y Métricas -->
+      <!-- Panel de KPIs y Métricas Resumen -->
       <div id="kpiContainer" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 hidden">
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
           <p class="text-xs font-bold text-slate-400 uppercase">Total Registros</p>
@@ -81,20 +87,45 @@
         </div>
       </div>
 
-      <!-- Contenedor Principal de Datos -->
+      <!-- Contenedor dinámico de datos/tablas -->
       <div id="contentArea">
-        <p class="text-slate-500">Selecciona una pestaña para ver la información.</p>
+        <p class="text-slate-500">Selecciona una pestaña del menú para comenzar.</p>
       </div>
     </main>
   </div>
 
   <script>
-    // 1. REEMPLAZA ESTOS DOS VALORES CON LOS TUYOS:
-    const API_URL = "https://script.google.com/a/macros/nfq.es/s/AKfycbwtGUoY8VUjMz3pCxOaMKdj2nRQbhkds-AoKKEe4fA3c-5TvEw4oLllx4qOb3df3QhN/exec"; 
+    // ⚠️ REEMPLAZA ESTA URL CON LA DE TU GOOGLE APPS SCRIPT
+    const API_URL = "https://script.google.com/a/macros/nfq.es/s/AKfycbz6HrLsR0slMaBXlLpKCbaekEJgkmjsA1EFN2gw0A0zusimuPyGfBU_G2tCFV5ocupF/exec"; 
     
     let currentUser = null;
     let currentData = [];
 
+    // Función JSONP para evitar bloqueos CORS corporativos
+    function fetchJSONP(url) {
+      return new Promise((resolve, reject) => {
+        const callbackName = 'jsonp_cb_' + Math.round(100000 * Math.random());
+        window[callbackName] = function(data) {
+          delete window[callbackName];
+          document.body.removeChild(script);
+          resolve(data);
+        };
+
+        const script = document.createElement('script');
+        const separator = url.includes('?') ? '&' : '?';
+        script.src = `${url}${separator}callback=${callbackName}`;
+        script.onerror = function() {
+          delete window[callbackName];
+          if (document.body.contains(script)) {
+            document.body.removeChild(script);
+          }
+          reject(new Error('Error de conexión con Google Apps Script.'));
+        };
+        document.body.appendChild(script);
+      });
+    }
+
+    // Decodifica el token JWT devuelto por Google Sign-In
     function parseJwt(token) {
       try {
         const base64Url = token.split('.')[1];
@@ -108,6 +139,7 @@
       }
     }
 
+    // Procesa la autenticación del usuario
     async function handleCredentialResponse(response) {
       const errorEl = document.getElementById('loginError');
       const spinner = document.getElementById('loginSpinner');
@@ -117,12 +149,13 @@
       const payload = parseJwt(response.credential);
       if (!payload || !payload.email) {
         showError("Error al validar las credenciales de Google.");
+        spinner.classList.add('hidden');
         return;
       }
 
       try {
-        const res = await fetch(`${API_URL}?action=verifyUser&email=${encodeURIComponent(payload.email)}`);
-        const result = await res.json();
+        const requestUrl = `${API_URL}?action=verifyUser&email=${encodeURIComponent(payload.email)}`;
+        const result = await fetchJSONP(requestUrl);
 
         spinner.classList.add('hidden');
 
@@ -134,7 +167,7 @@
         }
       } catch (err) {
         spinner.classList.add('hidden');
-        showError("Error de conexión con Google Apps Script. Revisa que la URL de la API sea correcta.");
+        showError("Error de conexión. Asegúrate de haber guardado el código Apps Script con una 'Nueva versión' en 'Gestionar despliegues'.");
       }
     }
 
@@ -152,7 +185,7 @@
       document.getElementById('userEmail').textContent = `${currentUser.email} (${currentUser.rol})`;
 
       const allowedTabs = currentUser.pestanas === 'ALL' 
-        ? ['Resumen', 'Ventas', 'Riesgos', 'Finanzas'] // Nombres de pestañas por defecto para administradores
+        ? ['Resumen', 'Ventas', 'Riesgos', 'Finanzas'] // Pestañas que ven los Administradores
         : currentUser.pestanas.split(',').map(t => t.trim());
 
       const navMenu = document.getElementById('navMenu');
@@ -169,6 +202,7 @@
       if (allowedTabs.length > 0) loadTabData(allowedTabs[0]);
     }
 
+    // Carga los datos de la pestaña usando JSONP
     async function loadTabData(tabName) {
       document.getElementById('currentTabTitle').textContent = tabName;
       document.getElementById('searchInput').classList.add('hidden');
@@ -178,8 +212,8 @@
       contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Cargando datos en tiempo real desde Google Sheet...</div>';
 
       try {
-        const res = await fetch(`${API_URL}?action=getData&sheet=${encodeURIComponent(tabName)}`);
-        const result = await res.json();
+        const requestUrl = `${API_URL}?action=getData&sheet=${encodeURIComponent(tabName)}`;
+        const result = await fetchJSONP(requestUrl);
 
         if (result.success) {
           currentData = result.data;
@@ -188,23 +222,24 @@
           contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error: ${result.message}</div>`;
         }
       } catch (e) {
-        contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al conectar con la hoja de datos.</div>`;
+        contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al conectar con la pestaña solicitada.</div>`;
       }
     }
 
+    // Renderiza la tabla y tarjetas de métricas
     function renderDashboardContent(data) {
       const contentArea = document.getElementById('contentArea');
       if (!data || data.length === 0) {
-        contentArea.innerHTML = '<div class="p-8 bg-white rounded-xl shadow-sm border text-slate-500 text-center">La pestaña no contiene datos.</div>';
+        contentArea.innerHTML = '<div class="p-8 bg-white rounded-xl shadow-sm border border-slate-200 text-slate-500 text-center">La pestaña no contiene datos o está vacía.</div>';
         return;
       }
 
-      // Mostrar KPIs
+      // Actualizar contador
       document.getElementById('kpiTotal').textContent = data.length;
       document.getElementById('kpiContainer').classList.remove('hidden');
       document.getElementById('searchInput').classList.remove('hidden');
 
-      // Generar Tabla
+      // Generar la tabla dinámicamente
       const headers = Object.keys(data[0]);
       let html = `<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden"><div class="overflow-x-auto"><table id="dataTable" class="min-w-full divide-y divide-slate-200"><thead class="bg-slate-50"><tr>`;
       
@@ -225,6 +260,7 @@
       contentArea.innerHTML = html;
     }
 
+    // Filtrado interactivo en tiempo real
     function filterTable() {
       const input = document.getElementById("searchInput").value.toLowerCase();
       const rows = document.querySelectorAll("#dataTable tbody tr");
