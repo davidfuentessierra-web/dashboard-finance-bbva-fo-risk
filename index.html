@@ -104,7 +104,7 @@
       </div>
 
       <!-- KPIS DINÁMICOS -->
-      <div id="kpiContainer" class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6 hidden">
+      <div id="kpiContainer" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 hidden">
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
           <p id="kpiLabel1" class="text-xs font-bold text-slate-400 uppercase">Total Horas Imputadas</p>
           <h3 id="kpiVal1" class="text-2xl font-bold text-blue-600 mt-1">0 h</h3>
@@ -120,6 +120,10 @@
         <div id="kpiCostContainer" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hidden">
           <p class="text-xs font-bold text-slate-400 uppercase">Coste Total Acumulado</p>
           <h3 id="kpiVal4" class="text-2xl font-bold text-emerald-600 mt-1">0,00 €</h3>
+        </div>
+        <div id="kpiRecognizedContainer" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hidden">
+          <p class="text-xs font-bold text-slate-400 uppercase">Reconocido Total</p>
+          <h3 id="kpiVal5" class="text-2xl font-bold text-indigo-600 mt-1">0,00 €</h3>
         </div>
       </div>
 
@@ -137,11 +141,12 @@
     let currentUser = null;
     let rawData = [];
     let processedRecords = [];
+    let filteredRecords = [];
     let selectedProjects = [];
     let employeeCosts = {};
+    let projectMargins = {}; // Almacena el % de margen por ID de Proyecto { "PC2027-00111": 20 }
     let activeModule = 'hours';
 
-    // Función global para formatear números en español con separador de miles siempre (ej. 1.234,50)
     function formatNumber(val, decimals = 2) {
       const num = parseFloat(val) || 0;
       return new Intl.NumberFormat('es-ES', {
@@ -151,10 +156,14 @@
       }).format(num);
     }
 
-    function loadSavedCosts() {
-      const saved = localStorage.getItem('employee_costs_data');
-      if (saved) {
-        try { employeeCosts = JSON.parse(saved); } catch(e) {}
+    function loadSavedCostsAndMargins() {
+      const savedCosts = localStorage.getItem('employee_costs_data');
+      if (savedCosts) {
+        try { employeeCosts = JSON.parse(savedCosts); } catch(e) {}
+      }
+      const savedMargins = localStorage.getItem('project_margins_data');
+      if (savedMargins) {
+        try { projectMargins = JSON.parse(savedMargins); } catch(e) {}
       }
     }
 
@@ -162,8 +171,23 @@
       const numValue = parseFloat(value) || 0;
       employeeCosts[empName] = numValue;
       localStorage.setItem('employee_costs_data', JSON.stringify(employeeCosts));
+      showSaveAlert(`saved_alert_${btoa(unescape(encodeURIComponent(empName))).replace(/=/g, '')}`);
+    }
+
+    function saveProjectMargin(projId, value) {
+      const numValue = parseFloat(value) || 0;
+      projectMargins[projId] = numValue;
+      localStorage.setItem('project_margins_data', JSON.stringify(projectMargins));
+      showSaveAlert(`saved_alert_m_${btoa(unescape(encodeURIComponent(projId))).replace(/=/g, '')}`);
       
-      const alertEl = document.getElementById(`saved_alert_${btoa(unescape(encodeURIComponent(empName))).replace(/=/g, '')}`);
+      // Recalcular la vista actual de costes
+      if (activeModule === 'project_costs') {
+        renderProjectCostsTable(filteredRecords);
+      }
+    }
+
+    function showSaveAlert(elementId) {
+      const alertEl = document.getElementById(elementId);
       if (alertEl) {
         alertEl.classList.remove('opacity-0');
         setTimeout(() => alertEl.classList.add('opacity-0'), 2000);
@@ -260,7 +284,7 @@
 
         if (result.success) {
           currentUser = result.user;
-          loadSavedCosts();
+          loadSavedCostsAndMargins();
           initDashboard();
         } else {
           showError(result.message);
@@ -332,7 +356,7 @@
         document.getElementById('currentTabSubtitle').textContent = "Visión por proyectos, personas e imputaciones diarias";
       } else if (activeModule === 'project_costs') {
         document.getElementById('currentTabTitle').textContent = "Coste por Proyecto";
-        document.getElementById('currentTabSubtitle').textContent = "Análisis de costes medios por proyecto e imputaciones de personal";
+        document.getElementById('currentTabSubtitle').textContent = "Análisis de costes medios por proyecto, margen e importes a reconocer";
       }
 
       document.getElementById('filterBar').classList.add('hidden');
@@ -514,7 +538,7 @@
       const endDate = document.getElementById('filterEndDate').value;
       const search = document.getElementById('searchInput').value.toLowerCase();
 
-      const filtered = processedRecords.filter(r => {
+      filteredRecords = processedRecords.filter(r => {
         if (startDate && r.isoDate < startDate) return false;
         if (endDate && r.isoDate > endDate) return false;
 
@@ -532,15 +556,21 @@
       });
 
       if (activeModule === 'project_costs') {
-        renderProjectCostsTable(filtered);
+        renderProjectCostsTable(filteredRecords);
       } else {
-        renderHierarchicalTable(filtered);
+        renderHierarchicalTable(filteredRecords);
       }
     }
 
     // TABLA 1: CONTROL DE HORAS
     function renderHierarchicalTable(data) {
       document.getElementById('kpiCostContainer').classList.add('hidden');
+      document.getElementById('kpiRecognizedContainer').classList.add('hidden');
+      
+      // Ajustar layout de KPIs a 3 columnas
+      const kpiContainer = document.getElementById('kpiContainer');
+      kpiContainer.className = "grid grid-cols-1 md:grid-cols-3 gap-6 mb-6";
+
       const contentArea = document.getElementById('contentArea');
       
       if (data.length === 0) {
@@ -674,9 +704,15 @@
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO
+    // TABLA 2: COSTE POR PROYECTO (CON MARGEN Y TOTAL A RECONOCER)
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
+      document.getElementById('kpiRecognizedContainer').classList.remove('hidden');
+      
+      // Ajustar layout de KPIs a 5 columnas
+      const kpiContainer = document.getElementById('kpiContainer');
+      kpiContainer.className = "grid grid-cols-1 md:grid-cols-5 gap-4 mb-6";
+
       const contentArea = document.getElementById('contentArea');
 
       if (data.length === 0) {
@@ -687,6 +723,7 @@
       const projectsGroup = {};
       let grandTotalHours = 0;
       let grandTotalCost = 0;
+      let grandTotalRecognized = 0;
       const uniqueEmps = new Set();
 
       data.forEach(r => {
@@ -726,13 +763,29 @@
         empMap[r.empleado].dias.push(r);
       });
 
+      // Calcular acumulado de lo reconocido para los proyectos filtrados
+      Object.keys(projectsGroup).forEach(projKey => {
+        const proj = projectsGroup[projKey];
+        const marginPct = projectMargins[proj.projectId] !== undefined ? projectMargins[proj.projectId] : 0;
+        const marginDec = marginPct / 100;
+        
+        let recognized = 0;
+        if (marginDec < 1) {
+          recognized = proj.totalCoste / (1 - marginDec);
+        } else {
+          recognized = proj.totalCoste;
+        }
+        grandTotalRecognized += recognized;
+      });
+
       document.getElementById('kpiLabel1').textContent = "Total Horas";
       document.getElementById('kpiVal1').textContent = `${formatNumber(grandTotalHours, 1)} h`;
-      document.getElementById('kpiLabel2').textContent = "Proyectos Activos";
+      document.getElementById('kpiLabel2').textContent = "Proyectos";
       document.getElementById('kpiVal2').textContent = formatNumber(Object.keys(projectsGroup).length, 0);
-      document.getElementById('kpiLabel3').textContent = "Empleados Imputando";
+      document.getElementById('kpiLabel3').textContent = "Empleados";
       document.getElementById('kpiVal3').textContent = formatNumber(uniqueEmps.size, 0);
       document.getElementById('kpiVal4').textContent = `${formatNumber(grandTotalCost, 2)} €`;
+      document.getElementById('kpiVal5').textContent = `${formatNumber(grandTotalRecognized, 2)} €`;
 
       let html = `<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
@@ -740,11 +793,13 @@
             <thead class="bg-slate-50">
               <tr>
                 <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase w-12">+</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ID Proyecto</th>
-                <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nombre del Proyecto</th>
-                <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Coste Medio (€/h)</th>
-                <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Horas Totales</th>
-                <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Coste Total (€)</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">ID Proyecto</th>
+                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nombre del Proyecto</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Coste Medio (€/h)</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Horas Totales</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Coste Total (€)</th>
+                <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase w-28">Margen (%)</th>
+                <th class="px-4 py-3 text-right text-xs font-semibold text-indigo-600 uppercase">Total a Reconocer (€)</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-slate-200">`;
@@ -754,21 +809,43 @@
         const projRowId = `cproj_${pIdx}`;
         const empleadosList = Object.values(proj.empleadosMap);
         const costeMedioHora = proj.totalHoras > 0 ? (proj.totalCoste / proj.totalHoras) : 0;
+        
+        const currentMargin = projectMargins[proj.projectId] !== undefined ? projectMargins[proj.projectId] : 0;
+        const marginDec = currentMargin / 100;
+        
+        let totalRecognizedProj = 0;
+        if (marginDec < 1) {
+          totalRecognizedProj = proj.totalCoste / (1 - marginDec);
+        } else {
+          totalRecognizedProj = proj.totalCoste;
+        }
+
+        const safeProjId = btoa(unescape(encodeURIComponent(proj.projectId))).replace(/=/g, '');
 
         html += `
           <tr class="hover:bg-emerald-50/40 transition cursor-pointer" onclick="toggleRow('${projRowId}')">
             <td class="px-4 py-4 text-center text-emerald-600 font-bold text-lg">
               <span id="icon_${projRowId}">＋</span>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${proj.projectId}</td>
-            <td class="px-6 py-4 text-sm font-semibold text-slate-700">${proj.projectName}</td>
-            <td class="px-6 py-4 text-right text-sm font-bold text-slate-600">${formatNumber(costeMedioHora, 2)} €/h</td>
-            <td class="px-6 py-4 text-right text-sm font-semibold text-slate-700">${formatNumber(proj.totalHoras, 1)} h</td>
-            <td class="px-6 py-4 text-right text-sm font-bold text-emerald-600">${formatNumber(proj.totalCoste, 2)} €</td>
+            <td class="px-4 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${proj.projectId}</td>
+            <td class="px-4 py-4 text-sm font-semibold text-slate-700">${proj.projectName}</td>
+            <td class="px-4 py-4 text-right text-sm font-bold text-slate-600">${formatNumber(costeMedioHora, 2)} €/h</td>
+            <td class="px-4 py-4 text-right text-sm font-semibold text-slate-700">${formatNumber(proj.totalHoras, 1)} h</td>
+            <td class="px-4 py-4 text-right text-sm font-bold text-emerald-600">${formatNumber(proj.totalCoste, 2)} €</td>
+            <td class="px-4 py-4 text-center text-sm" onclick="event.stopPropagation()">
+              <div class="flex items-center justify-center gap-1">
+                <input type="number" step="0.1" value="${currentMargin}" placeholder="0"
+                  onchange="saveProjectMargin('${proj.projectId.replace(/'/g, "\\'")}', this.value)"
+                  class="w-20 px-2 py-1 bg-slate-50 border border-slate-300 rounded text-center text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none">
+                <span class="text-xs font-bold text-slate-400">%</span>
+              </div>
+              <span id="saved_alert_m_${safeProjId}" class="block text-[10px] text-indigo-600 font-bold transition-opacity duration-300 opacity-0">✓</span>
+            </td>
+            <td class="px-4 py-4 text-right text-sm font-extrabold text-indigo-600">${formatNumber(totalRecognizedProj, 2)} €</td>
           </tr>
 
           <tr id="${projRowId}" class="hidden bg-slate-50 border-b border-slate-200">
-            <td colspan="6" class="p-4">
+            <td colspan="8" class="p-4">
               <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-inner ml-6">
                 <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Desglose Económico de Empleados en ${proj.projectId}</h4>
                 <table class="min-w-full divide-y divide-slate-200">
