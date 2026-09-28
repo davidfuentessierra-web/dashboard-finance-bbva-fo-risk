@@ -8,7 +8,7 @@
   <!-- SDK de Inicio de Sesión de Google -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body class="bg-slate-100 font-sans min-h-screen text-slate-800">
+<body class="bg-slate-100 font-sans min-h-screen text-slate-800" onclick="closeDropdownIfOutside(event)">
 
   <!-- PANTALLA DE LOGIN -->
   <div id="loginSection" class="flex items-center justify-center min-h-screen p-4">
@@ -89,9 +89,9 @@
               class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
           </div>
 
-          <div class="relative">
+          <div class="relative" id="projectDropdownContainer">
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Filtrar Proyectos</label>
-            <button onclick="toggleProjectDropdown()" id="projectDropdownBtn"
+            <button onclick="toggleProjectDropdown(event)" id="projectDropdownBtn"
               class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-left text-slate-700 flex justify-between items-center">
               <span id="selectedProjectsLabel">Todos los proyectos</span>
               <span class="text-xs">▼</span>
@@ -277,7 +277,7 @@
       }
     }
 
-    // PARSEADOR Y NORMALIZADOR DE DATOS
+    // PARSEADOR DE DATOS
     function processHoursData(data) {
       processedRecords = [];
 
@@ -366,8 +366,17 @@
       selectedProjects = [...projects];
     }
 
-    function toggleProjectDropdown() {
+    function toggleProjectDropdown(e) {
+      if(e) e.stopPropagation();
       document.getElementById('projectDropdown').classList.toggle('hidden');
+    }
+
+    function closeDropdownIfOutside(e) {
+      const container = document.getElementById('projectDropdownContainer');
+      const dropdown = document.getElementById('projectDropdown');
+      if (container && dropdown && !container.contains(e.target)) {
+        dropdown.classList.add('hidden');
+      }
     }
 
     function toggleSelectAllProjects(master) {
@@ -417,7 +426,7 @@
       renderHierarchicalTable(filtered);
     }
 
-    // TABLA JERÁRQUICA: PROYECTO -> PERSONAS -> DÍAS
+    // TABLA JERÁRQUICA
     function renderHierarchicalTable(data) {
       const contentArea = document.getElementById('contentArea');
       
@@ -429,7 +438,6 @@
         return;
       }
 
-      // 1. Agrupar por Proyecto
       const projectsGroup = {};
       let totalHoursSum = 0;
       const uniqueEmps = new Set();
@@ -449,7 +457,6 @@
         totalHoursSum += r.horas;
         uniqueEmps.add(r.empleado);
 
-        // Subagrupar por Empleado dentro del Proyecto
         const empMap = projectsGroup[projKey].empleadosMap;
         if (!empMap[r.empleado]) {
           empMap[r.empleado] = {
@@ -464,12 +471,10 @@
 
       const uniqueProjsCount = Object.keys(projectsGroup).length;
 
-      // Actualizar KPIs
       document.getElementById('kpiTotalHours').textContent = `${totalHoursSum.toFixed(1)} h`;
       document.getElementById('kpiTotalProjects').textContent = uniqueProjsCount;
       document.getElementById('kpiTotalEmployees').textContent = uniqueEmps.size;
 
-      // Render NIVEL 1: Tabla de Proyectos
       let html = `<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-slate-200">
@@ -574,7 +579,6 @@
       contentArea.innerHTML = html;
     }
 
-    // Alternar visibilidad de filas (Nivel 1 y Nivel 2)
     function toggleRow(rowId) {
       const row = document.getElementById(rowId);
       const icon = document.getElementById(`icon_${rowId}`);
