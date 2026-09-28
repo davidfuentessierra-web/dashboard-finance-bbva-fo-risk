@@ -73,7 +73,7 @@
         </div>
       </header>
 
-      <!-- BARRA DE FILTROS (CONTROL DE HORAS Y COSTE POR PROYECTO) -->
+      <!-- BARRA DE FILTROS -->
       <div id="filterBar" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6 hidden">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
@@ -119,7 +119,7 @@
         </div>
         <div id="kpiCostContainer" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hidden">
           <p class="text-xs font-bold text-slate-400 uppercase">Coste Total Acumulado</p>
-          <h3 id="kpiVal4" class="text-2xl font-bold text-emerald-600 mt-1">0.00 €</h3>
+          <h3 id="kpiVal4" class="text-2xl font-bold text-emerald-600 mt-1">0,00 €</h3>
         </div>
       </div>
 
@@ -139,7 +139,17 @@
     let processedRecords = [];
     let selectedProjects = [];
     let employeeCosts = {};
-    let activeModule = 'hours'; // 'hours', 'project_costs', 'employee_costs'
+    let activeModule = 'hours';
+
+    // Función global para formatear números en español con separador de miles siempre (ej. 1.234,50)
+    function formatNumber(val, decimals = 2) {
+      const num = parseFloat(val) || 0;
+      return new Intl.NumberFormat('es-ES', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+        useGrouping: true
+      }).format(num);
+    }
 
     function loadSavedCosts() {
       const saved = localStorage.getItem('employee_costs_data');
@@ -573,11 +583,11 @@
       });
 
       document.getElementById('kpiLabel1').textContent = "Total Horas Imputadas";
-      document.getElementById('kpiVal1').textContent = `${totalHoursSum.toFixed(1)} h`;
+      document.getElementById('kpiVal1').textContent = `${formatNumber(totalHoursSum, 1)} h`;
       document.getElementById('kpiLabel2').textContent = "Proyectos Activos";
-      document.getElementById('kpiVal2').textContent = Object.keys(projectsGroup).length;
+      document.getElementById('kpiVal2').textContent = formatNumber(Object.keys(projectsGroup).length, 0);
       document.getElementById('kpiLabel3').textContent = "Empleados Imputando";
-      document.getElementById('kpiVal3').textContent = uniqueEmps.size;
+      document.getElementById('kpiVal3').textContent = formatNumber(uniqueEmps.size, 0);
 
       let html = `<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
@@ -608,7 +618,7 @@
             <td class="px-6 py-4 text-center text-sm text-slate-600">
               <span class="px-2.5 py-1 bg-slate-100 rounded-full text-xs font-bold text-slate-700">${empleadosList.length} pers.</span>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">${proj.totalHoras.toFixed(1)} h</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">${formatNumber(proj.totalHoras, 1)} h</td>
           </tr>
 
           <tr id="${projRowId}" class="hidden bg-slate-50 border-b border-slate-200">
@@ -631,7 +641,7 @@
             <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="event.stopPropagation(); toggleRow('${empRowId}')">
               <td class="px-3 py-2 text-center text-blue-600 font-bold"><span id="icon_${empRowId}">＋</span></td>
               <td class="px-4 py-2 text-sm font-medium text-slate-800">${emp.empleado}</td>
-              <td class="px-4 py-2 text-sm text-right font-bold text-slate-700">${emp.horasEmpleado.toFixed(1)} h</td>
+              <td class="px-4 py-2 text-sm text-right font-bold text-slate-700">${formatNumber(emp.horasEmpleado, 1)} h</td>
             </tr>
             <tr id="${empRowId}" class="hidden bg-blue-50/30">
               <td colspan="3" class="px-6 py-3">
@@ -650,7 +660,7 @@
             html += `
               <tr>
                 <td class="py-1.5 text-slate-600">${d.fechaFormateada}</td>
-                <td class="py-1.5 text-right font-semibold text-slate-800">${d.horas.toFixed(1)} h</td>
+                <td class="py-1.5 text-right font-semibold text-slate-800">${formatNumber(d.horas, 1)} h</td>
               </tr>`;
           });
 
@@ -664,7 +674,7 @@
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO (CON COSTE MEDIO Y TOTALES)
+    // TABLA 2: COSTE POR PROYECTO
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
       const contentArea = document.getElementById('contentArea');
@@ -717,12 +727,12 @@
       });
 
       document.getElementById('kpiLabel1').textContent = "Total Horas";
-      document.getElementById('kpiVal1').textContent = `${grandTotalHours.toFixed(1)} h`;
+      document.getElementById('kpiVal1').textContent = `${formatNumber(grandTotalHours, 1)} h`;
       document.getElementById('kpiLabel2').textContent = "Proyectos Activos";
-      document.getElementById('kpiVal2').textContent = Object.keys(projectsGroup).length;
+      document.getElementById('kpiVal2').textContent = formatNumber(Object.keys(projectsGroup).length, 0);
       document.getElementById('kpiLabel3').textContent = "Empleados Imputando";
-      document.getElementById('kpiVal3').textContent = uniqueEmps.size;
-      document.getElementById('kpiVal4').textContent = `${grandTotalCost.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €`;
+      document.getElementById('kpiVal3').textContent = formatNumber(uniqueEmps.size, 0);
+      document.getElementById('kpiVal4').textContent = `${formatNumber(grandTotalCost, 2)} €`;
 
       let html = `<div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div class="overflow-x-auto">
@@ -752,9 +762,9 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${proj.projectId}</td>
             <td class="px-6 py-4 text-sm font-semibold text-slate-700">${proj.projectName}</td>
-            <td class="px-6 py-4 text-right text-sm font-bold text-slate-600">${costeMedioHora.toFixed(2)} €/h</td>
-            <td class="px-6 py-4 text-right text-sm font-semibold text-slate-700">${proj.totalHoras.toFixed(1)} h</td>
-            <td class="px-6 py-4 text-right text-sm font-bold text-emerald-600">${proj.totalCoste.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €</td>
+            <td class="px-6 py-4 text-right text-sm font-bold text-slate-600">${formatNumber(costeMedioHora, 2)} €/h</td>
+            <td class="px-6 py-4 text-right text-sm font-semibold text-slate-700">${formatNumber(proj.totalHoras, 1)} h</td>
+            <td class="px-6 py-4 text-right text-sm font-bold text-emerald-600">${formatNumber(proj.totalCoste, 2)} €</td>
           </tr>
 
           <tr id="${projRowId}" class="hidden bg-slate-50 border-b border-slate-200">
@@ -776,9 +786,9 @@
           html += `
             <tr class="hover:bg-slate-50 transition">
               <td class="px-4 py-2 text-sm font-medium text-slate-800">${emp.empleado}</td>
-              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-600">${emp.costeHora.toFixed(2)} €/h</td>
-              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-700">${emp.horasEmpleado.toFixed(1)} h</td>
-              <td class="px-4 py-2 text-sm text-right font-bold text-emerald-600">${emp.costeTotalEmp.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})} €</td>
+              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-600">${formatNumber(emp.costeHora, 2)} €/h</td>
+              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-700">${formatNumber(emp.horasEmpleado, 1)} h</td>
+              <td class="px-4 py-2 text-sm text-right font-bold text-emerald-600">${formatNumber(emp.costeTotalEmp, 2)} €</td>
             </tr>`;
         });
 
