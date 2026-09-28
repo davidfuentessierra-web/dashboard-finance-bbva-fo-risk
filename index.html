@@ -308,77 +308,112 @@ function apiCall(params, retries = 2) {
       }
     }
 
-    // PARSEADOR DE DATOS
-    function processHoursData(data) {
-      processedRecords = [];
+    // PARSEADOR Y NORMALIZADOR DE DATOS (A prueba de zonas horarias)
+function processHoursData(data) {
+  processedRecords = [];
 
-      if (!data || data.length === 0) return;
+  if (!data || data.length === 0) return;
 
-      const sample = data[0];
-      const keys = Object.keys(sample);
+  const sample = data[0];
+  const keys = Object.keys(sample);
 
-      const empKey = keys.find(k => k.toLowerCase().includes('empleado') || k.toLowerCase().includes('employee')) || keys[0];
-      const dateKey = keys.find(k => k.toLowerCase().includes('fecha') || k.toLowerCase().includes('date') || k.toLowerCase().includes('imputación') || k.toLowerCase().includes('imputacion')) || keys[1];
-      const projKey = keys.find(k => k.toLowerCase().includes('proyecto') || k.toLowerCase().includes('project')) || keys[2];
-      const hourKey = keys.find(k => k.toLowerCase().includes('hora') || k.toLowerCase().includes('hour') || k.toLowerCase().includes('imputada')) || keys[3];
+  const empKey = keys.find(k => k.toLowerCase().includes('empleado') || k.toLowerCase().includes('employee')) || keys[0];
+  const dateKey = keys.find(k => k.toLowerCase().includes('fecha') || k.toLowerCase().includes('date') || k.toLowerCase().includes('imputación') || k.toLowerCase().includes('imputacion')) || keys[1];
+  const projKey = keys.find(k => k.toLowerCase().includes('proyecto') || k.toLowerCase().includes('project')) || keys[2];
+  const hourKey = keys.find(k => k.toLowerCase().includes('hora') || k.toLowerCase().includes('hour') || k.toLowerCase().includes('imputada')) || keys[3];
 
-      data.forEach(row => {
-        const rawEmpleado = String(row[empKey] || '').trim();
-        const rawFecha = row[dateKey];
-        const rawProyecto = String(row[projKey] || '').trim();
-        const rawHoras = parseFloat(row[hourKey]) || 0;
+  data.forEach(row => {
+    const rawEmpleado = String(row[empKey] || '').trim();
+    const rawFecha = row[dateKey];
+    const rawProyecto = String(row[projKey] || '').trim();
+    const rawHoras = parseFloat(row[hourKey]) || 0;
 
-        if (!rawEmpleado || rawEmpleado === '' || rawEmpleado.toLowerCase() === 'undefined') return;
+    if (!rawEmpleado || rawEmpleado === '' || rawEmpleado.toLowerCase() === 'undefined') return;
 
-        // Limpieza Empleado
-        let empleado = rawEmpleado;
-        if (rawEmpleado.includes('-')) {
-          empleado = rawEmpleado.substring(rawEmpleado.indexOf('-') + 1).trim();
-        }
-        if (empleado.includes(',')) {
-          const parts = empleado.split(',');
-          empleado = `${parts[0].trim()}, ${parts[1].trim()}`;
-        }
-
-        // Limpieza Proyecto
-        let projectId = 'SIN_ID';
-        let projectName = rawProyecto;
-        
-        const matchProj = rawProyecto.match(/\[(.*?)\]-(.*)/);
-        if (matchProj) {
-          projectId = matchProj[1].trim();
-          projectName = matchProj[2].trim();
-        } else if (rawProyecto.includes('-')) {
-          const partsP = rawProyecto.split('-');
-          projectId = partsP[0].replace(/\[\vert{}\]/g, '').trim();
-          projectName = partsP.slice(1).join('-').trim();
-        }
-
-        // Formatear Fecha
-        let dateObj = new Date(rawFecha);
-        let dateFormatted = rawFecha;
-        let isoDate = '';
-
-        if (!isNaN(dateObj.getTime())) {
-          const day = String(dateObj.getDate()).padStart(2, '0');
-          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-          const year = dateObj.getFullYear();
-          dateFormatted = `${day}/${month}/${year}`;
-          isoDate = `${year}-${month}-${day}`;
-        }
-
-        processedRecords.push({
-          empleado,
-          projectId,
-          projectName,
-          horas: rawHoras,
-          fechaFormateada: dateFormatted,
-          isoDate: isoDate,
-          rawFecha: dateObj
-        });
-      });
+    // 1. Limpieza Empleado
+    let empleado = rawEmpleado;
+    if (rawEmpleado.includes('-')) {
+      empleado = rawEmpleado.substring(rawEmpleado.indexOf('-') + 1).trim();
+    }
+    if (empleado.includes(',')) {
+      const parts = empleado.split(',');
+      empleado = `${parts[0].trim()}, ${parts[1].trim()}`;
     }
 
+    // 2. Limpieza Proyecto
+    let projectId = 'SIN_ID';
+    let projectName = rawProyecto;
+    
+    const matchProj = rawProyecto.match(/\[(.*?)\]-(.*)/);
+    if (matchProj) {
+      projectId = matchProj[1].trim();
+      projectName = matchProj[2].trim();
+    } else if (rawProyecto.includes('-')) {
+      const partsP = rawProyecto.split('-');
+      projectId = partsP[0].replace(/\[\vert{}\]/g, '').trim();
+      projectName = partsP.slice(1).join('-').trim();
+    }
+
+    // 3. Normalización estricta de Fecha (Ignorando desfasajes UTC)
+    let year = 0, month = 0, day = 0;
+    let dateObj = null;
+
+    if (rawFecha instanceof Date) {
+      year = rawFecha.getFullYear();
+      month = rawFecha.getMonth() + 1;
+      day = rawFecha.getDate();
+      dateObj = rawFecha;
+    } else {
+      const strFecha = String(rawFecha).trim();
+      
+      // Formato dd/mm/aaaa
+      if (strFecha.includes('/')) {
+        const p = strFecha.split('/');
+        if (p.length === 3) {
+          day = parseInt(p[0], 10);
+          month = parseInt(p[1], 10);
+          year = parseInt(p[2].substring(0, 4), 10);
+        }
+      } 
+      // Formato aaaa-mm-dd (ISO / Apps Script String)
+      else if (strFecha.includes('-')) {
+        const p = strFecha.split('-');
+        if (p.length === 3) {
+          year = parseInt(p[0], 10);
+          month = parseInt(p[1], 10);
+          day = parseInt(p[2].substring(0, 2), 10);
+        }
+      }
+
+      if (year > 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        dateObj = new Date(year, month - 1, day);
+      } else {
+        dateObj = new Date(rawFecha);
+        if (!isNaN(dateObj.getTime())) {
+          year = dateObj.getFullYear();
+          month = dateObj.getMonth() + 1;
+          day = dateObj.getDate();
+        }
+      }
+    }
+
+    // Formatear cadenas comparables
+    const dayStr = String(day).padStart(2, '0');
+    const monthStr = String(month).padStart(2, '0');
+    const dateFormatted = `${dayStr}/${monthStr}/${year}`;
+    const isoDate = `${year}-${monthStr}-${dayStr}`;
+
+    processedRecords.push({
+      empleado,
+      projectId,
+      projectName,
+      horas: rawHoras,
+      fechaFormateada: dateFormatted,
+      isoDate: isoDate,
+      rawFecha: dateObj || new Date(0)
+    });
+  });
+}
     function populateProjectFilter() {
       const projects = [...new Set(processedRecords.map(r => r.projectId + ' - ' + r.projectName))].sort();
       const dropdown = document.getElementById('projectDropdown');
