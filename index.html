@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard BBVA FO Risk - Control de Horas</title>
+  <title>Dashboard BBVA FO Risk - Control de Horas & Costes</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- SDK de Inicio de Sesión de Google -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -69,26 +69,23 @@
       <header class="flex justify-between items-center mb-6">
         <div>
           <h2 id="currentTabTitle" class="text-3xl font-bold text-slate-800">Control de Horas</h2>
-          <p class="text-slate-500 text-sm">Visión por proyectos, personas e imputaciones diarias</p>
+          <p id="currentTabSubtitle" class="text-slate-500 text-sm">Visión por proyectos, personas e imputaciones diarias</p>
         </div>
       </header>
 
-      <!-- BARRA DE FILTROS -->
+      <!-- BARRA DE FILTROS PARA CONTROL DE HORAS -->
       <div id="filterBar" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6 hidden">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-          
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha Inicio</label>
             <input type="date" id="filterStartDate" onchange="applyFilters()" 
               class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha Fin</label>
             <input type="date" id="filterEndDate" onchange="applyFilters()" 
               class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-
           <div class="relative" id="projectDropdownContainer">
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Filtrar Proyectos</label>
             <button onclick="toggleProjectDropdown(event)" id="projectDropdownBtn"
@@ -96,20 +93,17 @@
               <span id="selectedProjectsLabel">Todos los proyectos</span>
               <span class="text-xs">▼</span>
             </button>
-            <div id="projectDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto p-2">
-            </div>
+            <div id="projectDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto p-2"></div>
           </div>
-
           <div>
             <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar</label>
             <input type="text" id="searchInput" onkeyup="applyFilters()" placeholder="Empleado o Proyecto..." 
               class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-
         </div>
       </div>
 
-      <!-- TARJETAS KPIS -->
+      <!-- KPIS DE CONTROL DE HORAS -->
       <div id="kpiContainer" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 hidden">
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
           <p class="text-xs font-bold text-slate-400 uppercase">Total Horas Imputadas</p>
@@ -125,7 +119,7 @@
         </div>
       </div>
 
-      <!-- CONTENEDOR TABLA JERÁRQUICA -->
+      <!-- CONTENEDOR PRINCIPAL -->
       <div id="contentArea">
         <p class="text-slate-500">Cargando datos...</p>
       </div>
@@ -140,74 +134,88 @@
     let rawData = [];
     let processedRecords = [];
     let selectedProjects = [];
+    let employeeCosts = {}; // Almacena los costes por empleado { "Nombre Empleado": 45.00 }
 
-   // Función API ultrarrobusta a prueba de Timeouts de Google Apps Script
-function apiCall(params, retries = 2) {
-  return new Promise((resolve, reject) => {
-    const attempt = (remainingRetries) => {
-      // Generar ID único para la llamada
-      const callbackName = 'cb_' + Math.floor(Math.random() * 1000000);
-      const script = document.createElement('script');
-      let completed = false;
-
-      // Crear los parámetros de la URL
-      let query = `?callback=${callbackName}`;
-      for (let key in params) {
-        query += `&${key}=${encodeURIComponent(params[key])}`;
+    // Cargar costes previamente guardados localmente
+    function loadSavedCosts() {
+      const saved = localStorage.getItem('employee_costs_data');
+      if (saved) {
+        try { employeeCosts = JSON.parse(saved); } catch(e) {}
       }
+    }
 
-      // Definir la función global Callback de forma permanente hasta que responda
-      window[callbackName] = function(data) {
-        if (completed) return;
-        completed = true;
-        clearTimeout(timer);
-        cleanup();
-        resolve(data);
-      };
-
-      // Limpieza de etiquetas del DOM sin borrar la función prematuramente
-      function cleanup() {
-        if (script.parentNode) script.parentNode.removeChild(script);
+    // Guardar coste manual
+    function saveEmployeeCost(empName, value) {
+      const numValue = parseFloat(value) || 0;
+      employeeCosts[empName] = numValue;
+      localStorage.setItem('employee_costs_data', JSON.stringify(employeeCosts));
+      
+      const alertEl = document.getElementById(`saved_alert_${btoa(unescape(encodeURIComponent(empName))).replace(/=/g, '')}`);
+      if (alertEl) {
+        alertEl.classList.remove('opacity-0');
+        setTimeout(() => alertEl.classList.add('opacity-0'), 2000);
       }
+    }
 
-      // Timeout amplio de 30 segundos
-      const timer = setTimeout(() => {
-        if (completed) return;
-        cleanup();
-        
-        // Dejar una función vacía de seguridad para evitar 'ReferenceError' si responde tarde
-        window[callbackName] = function() { delete window[callbackName]; };
+    // Comunicación API
+    function apiCall(params, retries = 2) {
+      return new Promise((resolve, reject) => {
+        const attempt = (remainingRetries) => {
+          const callbackName = 'cb_' + Math.floor(Math.random() * 1000000);
+          const script = document.createElement('script');
+          let completed = false;
 
-        if (remainingRetries > 0) {
-          console.warn(`Servidor lento. Reintentando... Quedan ${remainingRetries} intentos.`);
-          attempt(remainingRetries - 1);
-        } else {
-          delete window[callbackName];
-          reject(new Error("Timeout de respuesta del servidor Google Apps Script."));
-        }
-      }, 30000);
+          let query = `?callback=${callbackName}`;
+          for (let key in params) {
+            query += `&${key}=${encodeURIComponent(params[key])}`;
+          }
 
-      script.src = API_URL + query;
-      script.onerror = function() {
-        if (completed) return;
-        completed = true;
-        clearTimeout(timer);
-        cleanup();
-        
-        if (remainingRetries > 0) {
-          attempt(remainingRetries - 1);
-        } else {
-          delete window[callbackName];
-          reject(new Error("Error de red al conectar con Google Apps Script."));
-        }
-      };
+          window[callbackName] = function(data) {
+            if (completed) return;
+            completed = true;
+            clearTimeout(timer);
+            cleanup();
+            resolve(data);
+          };
 
-      document.body.appendChild(script);
-    };
+          function cleanup() {
+            if (script.parentNode) script.parentNode.removeChild(script);
+          }
 
-    attempt(retries);
-  });
-}
+          const timer = setTimeout(() => {
+            if (completed) return;
+            cleanup();
+            window[callbackName] = function() { delete window[callbackName]; };
+
+            if (remainingRetries > 0) {
+              attempt(remainingRetries - 1);
+            } else {
+              delete window[callbackName];
+              reject(new Error("Timeout de respuesta."));
+            }
+          }, 30000);
+
+          script.src = API_URL + query;
+          script.onerror = function() {
+            if (completed) return;
+            completed = true;
+            clearTimeout(timer);
+            cleanup();
+            if (remainingRetries > 0) {
+              attempt(remainingRetries - 1);
+            } else {
+              delete window[callbackName];
+              reject(new Error("Error de red."));
+            }
+          };
+
+          document.body.appendChild(script);
+        };
+
+        attempt(retries);
+      });
+    }
+
     function parseJwt(token) {
       try {
         const base64Url = token.split('.')[1];
@@ -229,7 +237,7 @@ function apiCall(params, retries = 2) {
       
       const payload = parseJwt(response.credential);
       if (!payload || !payload.email) {
-        showError("Error al procesar la autenticación de Google.");
+        showError("Error al procesar la autenticación.");
         spinner.classList.add('hidden');
         return;
       }
@@ -240,13 +248,14 @@ function apiCall(params, retries = 2) {
 
         if (result.success) {
           currentUser = result.user;
+          loadSavedCosts();
           initDashboard();
         } else {
           showError(result.message);
         }
       } catch (err) {
         spinner.classList.add('hidden');
-        showError("Error de conexión. Asegúrate de haber publicado 'Nueva versión' en Apps Script.");
+        showError("Error de conexión con Google Apps Script.");
       }
     }
 
@@ -263,10 +272,13 @@ function apiCall(params, retries = 2) {
       document.getElementById('userInfo').textContent = currentUser.nombre;
       document.getElementById('userEmail').textContent = `${currentUser.email} (${currentUser.rol})`;
 
-      const defaultTabs = ['[Controls]-Daily hour allocation'];
-      const allowedTabs = currentUser.pestanas === 'ALL' 
-        ? defaultTabs 
-        : currentUser.pestanas.split(',').map(t => t.trim());
+      // Mapeo de accesos permitidos
+      let allowedTabs = [];
+      if (currentUser.pestanas === 'ALL') {
+        allowedTabs = ['[Controls]-Daily hour allocation', 'Costes'];
+      } else {
+        allowedTabs = currentUser.pestanas.split(',').map(t => t.trim());
+      }
 
       const navMenu = document.getElementById('navMenu');
       navMenu.innerHTML = '';
@@ -274,16 +286,105 @@ function apiCall(params, retries = 2) {
       allowedTabs.forEach(tab => {
         const btn = document.createElement('button');
         btn.className = "w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition flex items-center gap-2";
-        btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-400"></span> Control de Horas`;
-        btn.onclick = () => loadHoursData(tab);
+        
+        if (tab === '[Controls]-Daily hour allocation') {
+          btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-400"></span> Control de Horas`;
+          btn.onclick = () => loadHoursData(tab);
+        } else if (tab === 'Costes') {
+          btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Coste Empleados`;
+          btn.onclick = () => renderCostsScreen();
+        } else {
+          btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-400"></span> ${tab}`;
+          btn.onclick = () => loadHoursData(tab);
+        }
+        
         navMenu.appendChild(btn);
       });
 
-      if (allowedTabs.length > 0) loadHoursData(allowedTabs[0]);
+      if (allowedTabs.length > 0) {
+        if (allowedTabs[0] === 'Costes') {
+          renderCostsScreen();
+        } else {
+          loadHoursData(allowedTabs[0]);
+        }
+      }
     }
 
+    // PANTALLA: COSTE DE EMPLEADOS
+    function renderCostsScreen() {
+      document.getElementById('currentTabTitle').textContent = "Coste Empleados";
+      document.getElementById('currentTabSubtitle').textContent = "Gestión y asignación de tarifas horarias por profesional";
+      document.getElementById('filterBar').classList.add('hidden');
+      document.getElementById('kpiContainer').classList.add('hidden');
+
+      const contentArea = document.getElementById('contentArea');
+      
+      // Obtener lista única de empleados procesados o mostrar mensaje
+      const uniqueEmployees = [...new Set(processedRecords.map(r => r.empleado))].sort();
+
+      if (uniqueEmployees.length === 0) {
+        contentArea.innerHTML = `
+          <div class="bg-white p-8 rounded-xl border border-slate-200 text-center">
+            <p class="text-slate-500 mb-4">Primero debes cargar los datos de la pestaña de Control de Horas para extraer la lista de empleados.</p>
+            <button onclick="loadHoursData('[Controls]-Daily hour allocation')" class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition">
+              Cargar Control de Horas
+            </button>
+          </div>`;
+        return;
+      }
+
+      let html = `
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+            <div>
+              <h3 class="font-bold text-slate-800">Tarifas por Empleado (€/hora)</h3>
+              <p class="text-xs text-slate-500">Los costes introducidos se guardan automáticamente</p>
+            </div>
+            <span class="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Modo Edición Manual</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-200">
+              <thead class="bg-slate-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nombre Empleado</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Coste Hora (€/h)</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Estado</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-slate-200">`;
+
+      uniqueEmployees.forEach(emp => {
+        const currentCost = employeeCosts[emp] !== undefined ? employeeCosts[emp] : '';
+        const safeId = btoa(unescape(encodeURIComponent(emp))).replace(/=/g, '');
+
+        html += `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">${emp}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm">
+              <div class="flex items-center gap-2">
+                <span class="text-slate-400 font-bold">€</span>
+                <input type="number" step="0.01" value="${currentCost}" placeholder="0.00"
+                  onchange="saveEmployeeCost('${emp.replace(/'/g, "\\'")}', this.value)"
+                  class="w-32 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-800 font-bold focus:ring-2 focus:ring-emerald-500 outline-none">
+              </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-xs">
+              <span id="saved_alert_${safeId}" class="text-emerald-600 font-bold transition-opacity duration-300 opacity-0">
+                ✓ Guardado
+              </span>
+            </td>
+          </tr>`;
+      });
+
+      html += `</tbody></table></div></div>`;
+      contentArea.innerHTML = html;
+    }
+
+    // CARGA DE DATOS DE CONTROL DE HORAS
     async function loadHoursData(tabName) {
       document.getElementById('currentTabTitle').textContent = "Control de Horas";
+      document.getElementById('currentTabSubtitle').textContent = "Visión por proyectos, personas e imputaciones diarias";
       document.getElementById('filterBar').classList.add('hidden');
       document.getElementById('kpiContainer').classList.add('hidden');
       
@@ -308,112 +409,103 @@ function apiCall(params, retries = 2) {
       }
     }
 
-    // PARSEADOR Y NORMALIZADOR DE DATOS (A prueba de zonas horarias)
-function processHoursData(data) {
-  processedRecords = [];
+    function processHoursData(data) {
+      processedRecords = [];
+      if (!data || data.length === 0) return;
 
-  if (!data || data.length === 0) return;
+      const sample = data[0];
+      const keys = Object.keys(sample);
 
-  const sample = data[0];
-  const keys = Object.keys(sample);
+      const empKey = keys.find(k => k.toLowerCase().includes('empleado') || k.toLowerCase().includes('employee')) || keys[0];
+      const dateKey = keys.find(k => k.toLowerCase().includes('fecha') || k.toLowerCase().includes('date') || k.toLowerCase().includes('imputación') || k.toLowerCase().includes('imputacion')) || keys[1];
+      const projKey = keys.find(k => k.toLowerCase().includes('proyecto') || k.toLowerCase().includes('project')) || keys[2];
+      const hourKey = keys.find(k => k.toLowerCase().includes('hora') || k.toLowerCase().includes('hour') || k.toLowerCase().includes('imputada')) || keys[3];
 
-  const empKey = keys.find(k => k.toLowerCase().includes('empleado') || k.toLowerCase().includes('employee')) || keys[0];
-  const dateKey = keys.find(k => k.toLowerCase().includes('fecha') || k.toLowerCase().includes('date') || k.toLowerCase().includes('imputación') || k.toLowerCase().includes('imputacion')) || keys[1];
-  const projKey = keys.find(k => k.toLowerCase().includes('proyecto') || k.toLowerCase().includes('project')) || keys[2];
-  const hourKey = keys.find(k => k.toLowerCase().includes('hora') || k.toLowerCase().includes('hour') || k.toLowerCase().includes('imputada')) || keys[3];
+      data.forEach(row => {
+        const rawEmpleado = String(row[empKey] || '').trim();
+        const rawFecha = row[dateKey];
+        const rawProyecto = String(row[projKey] || '').trim();
+        const rawHoras = parseFloat(row[hourKey]) || 0;
 
-  data.forEach(row => {
-    const rawEmpleado = String(row[empKey] || '').trim();
-    const rawFecha = row[dateKey];
-    const rawProyecto = String(row[projKey] || '').trim();
-    const rawHoras = parseFloat(row[hourKey]) || 0;
+        if (!rawEmpleado || rawEmpleado === '' || rawEmpleado.toLowerCase() === 'undefined') return;
 
-    if (!rawEmpleado || rawEmpleado === '' || rawEmpleado.toLowerCase() === 'undefined') return;
-
-    // 1. Limpieza Empleado
-    let empleado = rawEmpleado;
-    if (rawEmpleado.includes('-')) {
-      empleado = rawEmpleado.substring(rawEmpleado.indexOf('-') + 1).trim();
-    }
-    if (empleado.includes(',')) {
-      const parts = empleado.split(',');
-      empleado = `${parts[0].trim()}, ${parts[1].trim()}`;
-    }
-
-    // 2. Limpieza Proyecto
-    let projectId = 'SIN_ID';
-    let projectName = rawProyecto;
-    
-    const matchProj = rawProyecto.match(/\[(.*?)\]-(.*)/);
-    if (matchProj) {
-      projectId = matchProj[1].trim();
-      projectName = matchProj[2].trim();
-    } else if (rawProyecto.includes('-')) {
-      const partsP = rawProyecto.split('-');
-      projectId = partsP[0].replace(/\[\vert{}\]/g, '').trim();
-      projectName = partsP.slice(1).join('-').trim();
-    }
-
-    // 3. Normalización estricta de Fecha (Ignorando desfasajes UTC)
-    let year = 0, month = 0, day = 0;
-    let dateObj = null;
-
-    if (rawFecha instanceof Date) {
-      year = rawFecha.getFullYear();
-      month = rawFecha.getMonth() + 1;
-      day = rawFecha.getDate();
-      dateObj = rawFecha;
-    } else {
-      const strFecha = String(rawFecha).trim();
-      
-      // Formato dd/mm/aaaa
-      if (strFecha.includes('/')) {
-        const p = strFecha.split('/');
-        if (p.length === 3) {
-          day = parseInt(p[0], 10);
-          month = parseInt(p[1], 10);
-          year = parseInt(p[2].substring(0, 4), 10);
+        let empleado = rawEmpleado;
+        if (rawEmpleado.includes('-')) {
+          empleado = rawEmpleado.substring(rawEmpleado.indexOf('-') + 1).trim();
         }
-      } 
-      // Formato aaaa-mm-dd (ISO / Apps Script String)
-      else if (strFecha.includes('-')) {
-        const p = strFecha.split('-');
-        if (p.length === 3) {
-          year = parseInt(p[0], 10);
-          month = parseInt(p[1], 10);
-          day = parseInt(p[2].substring(0, 2), 10);
+        if (empleado.includes(',')) {
+          const parts = empleado.split(',');
+          empleado = `${parts[0].trim()}, ${parts[1].trim()}`;
         }
-      }
 
-      if (year > 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-        dateObj = new Date(year, month - 1, day);
-      } else {
-        dateObj = new Date(rawFecha);
-        if (!isNaN(dateObj.getTime())) {
-          year = dateObj.getFullYear();
-          month = dateObj.getMonth() + 1;
-          day = dateObj.getDate();
+        let projectId = 'SIN_ID';
+        let projectName = rawProyecto;
+        
+        const matchProj = rawProyecto.match(/\[(.*?)\]-(.*)/);
+        if (matchProj) {
+          projectId = matchProj[1].trim();
+          projectName = matchProj[2].trim();
+        } else if (rawProyecto.includes('-')) {
+          const partsP = rawProyecto.split('-');
+          projectId = partsP[0].replace(/\[\vert{}\]/g, '').trim();
+          projectName = partsP.slice(1).join('-').trim();
         }
-      }
+
+        let year = 0, month = 0, day = 0;
+        let dateObj = null;
+
+        if (rawFecha instanceof Date) {
+          year = rawFecha.getFullYear();
+          month = rawFecha.getMonth() + 1;
+          day = rawFecha.getDate();
+          dateObj = rawFecha;
+        } else {
+          const strFecha = String(rawFecha).trim();
+          if (strFecha.includes('/')) {
+            const p = strFecha.split('/');
+            if (p.length === 3) {
+              day = parseInt(p[0], 10);
+              month = parseInt(p[1], 10);
+              year = parseInt(p[2].substring(0, 4), 10);
+            }
+          } else if (strFecha.includes('-')) {
+            const p = strFecha.split('-');
+            if (p.length === 3) {
+              year = parseInt(p[0], 10);
+              month = parseInt(p[1], 10);
+              day = parseInt(p[2].substring(0, 2), 10);
+            }
+          }
+
+          if (year > 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            dateObj = new Date(year, month - 1, day);
+          } else {
+            dateObj = new Date(rawFecha);
+            if (!isNaN(dateObj.getTime())) {
+              year = dateObj.getFullYear();
+              month = dateObj.getMonth() + 1;
+              day = dateObj.getDate();
+            }
+          }
+        }
+
+        const dayStr = String(day).padStart(2, '0');
+        const monthStr = String(month).padStart(2, '0');
+        const dateFormatted = `${dayStr}/${monthStr}/${year}`;
+        const isoDate = `${year}-${monthStr}-${dayStr}`;
+
+        processedRecords.push({
+          empleado,
+          projectId,
+          projectName,
+          horas: rawHoras,
+          fechaFormateada: dateFormatted,
+          isoDate: isoDate,
+          rawFecha: dateObj || new Date(0)
+        });
+      });
     }
 
-    // Formatear cadenas comparables
-    const dayStr = String(day).padStart(2, '0');
-    const monthStr = String(month).padStart(2, '0');
-    const dateFormatted = `${dayStr}/${monthStr}/${year}`;
-    const isoDate = `${year}-${monthStr}-${dayStr}`;
-
-    processedRecords.push({
-      empleado,
-      projectId,
-      projectName,
-      horas: rawHoras,
-      fechaFormateada: dateFormatted,
-      isoDate: isoDate,
-      rawFecha: dateObj || new Date(0)
-    });
-  });
-}
     function populateProjectFilter() {
       const projects = [...new Set(processedRecords.map(r => r.projectId + ' - ' + r.projectName))].sort();
       const dropdown = document.getElementById('projectDropdown');
@@ -492,7 +584,6 @@ function processHoursData(data) {
       renderHierarchicalTable(filtered);
     }
 
-    // TABLA JERÁRQUICA
     function renderHierarchicalTable(data) {
       const contentArea = document.getElementById('contentArea');
       
@@ -561,7 +652,6 @@ function processHoursData(data) {
         const empleadosList = Object.values(proj.empleadosMap);
 
         html += `
-          <!-- FILA NIVEL 1: PROYECTO -->
           <tr class="hover:bg-blue-50/50 transition cursor-pointer" onclick="toggleRow('${projRowId}')">
             <td class="px-4 py-4 text-center text-blue-600 font-bold text-lg">
               <span id="icon_${projRowId}">＋</span>
@@ -574,7 +664,6 @@ function processHoursData(data) {
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">${proj.totalHoras.toFixed(1)} h</td>
           </tr>
 
-          <!-- DESPLIEGUE NIVEL 2: EMPLEADOS DEL PROYECTO -->
           <tr id="${projRowId}" class="hidden bg-slate-50 border-b border-slate-200">
             <td colspan="5" class="p-4">
               <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-inner ml-6">
@@ -594,7 +683,6 @@ function processHoursData(data) {
           const empRowId = `emp_${pIdx}_${eIdx}`;
 
           html += `
-            <!-- FILA NIVEL 2: EMPLEADO -->
             <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="event.stopPropagation(); toggleRow('${empRowId}')">
               <td class="px-3 py-2 text-center text-blue-600 font-bold">
                 <span id="icon_${empRowId}">＋</span>
@@ -603,7 +691,6 @@ function processHoursData(data) {
               <td class="px-4 py-2 text-sm text-right font-bold text-slate-700">${emp.horasEmpleado.toFixed(1)} h</td>
             </tr>
 
-            <!-- DESPLIEGUE NIVEL 3: DÍAS DEL EMPLEADO EN EL PROYECTO -->
             <tr id="${empRowId}" class="hidden bg-blue-50/30">
               <td colspan="3" class="px-6 py-3">
                 <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 ml-6">
@@ -641,7 +728,7 @@ function processHoursData(data) {
           </tr>`;
       });
 
-      html += `</tbody></table></div></div>`;
+      html += `</tbody>addClass</div></div>`;
       contentArea.innerHTML = html;
     }
 
