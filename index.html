@@ -71,6 +71,9 @@
           <h2 id="currentTabTitle" class="text-3xl font-bold text-slate-800">Control de Horas</h2>
           <p id="currentTabSubtitle" class="text-slate-500 text-sm">Visión por proyectos, personas e imputaciones diarias</p>
         </div>
+        <button onclick="clearCacheAndReload()" class="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-lg transition flex items-center gap-1">
+          🔄 Refrescar Datos
+        </button>
       </header>
 
       <!-- BARRA DE FILTROS -->
@@ -349,6 +352,7 @@
       }
     }
 
+    // CARGA OPTIMIZADA CON CACHÉ DE SESIÓN
     async function loadHoursData(tabName) {
       if (activeModule === 'hours') {
         document.getElementById('currentTabTitle').textContent = "Control de Horas";
@@ -358,17 +362,39 @@
         document.getElementById('currentTabSubtitle').textContent = "Análisis de costes medios por proyecto, margen e importes a reconocer";
       }
 
+      // Si los datos ya están procesados en memoria o en caché de sesión, los reutilizamos instantáneamente
+      const cachedData = sessionStorage.getItem(`cached_data_${tabName}`);
+      if (processedRecords.length > 0) {
+        document.getElementById('filterBar').classList.remove('hidden');
+        document.getElementById('kpiContainer').classList.remove('hidden');
+        applyFilters();
+        return;
+      } else if (cachedData) {
+        try {
+          rawData = JSON.parse(cachedData);
+          processHoursData(rawData);
+          populateProjectFilter();
+          document.getElementById('filterBar').classList.remove('hidden');
+          document.getElementById('kpiContainer').classList.remove('hidden');
+          applyFilters();
+          return;
+        } catch(e) {}
+      }
+
       document.getElementById('filterBar').classList.add('hidden');
       document.getElementById('kpiContainer').classList.add('hidden');
       
       const contentArea = document.getElementById('contentArea');
-      contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Procesando registros de horas...</div>';
+      contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Cargando datos por primera vez desde Google...</div>';
 
       try {
         const result = await apiCall({ action: "getData", sheet: tabName });
 
         if (result.success && result.data) {
           rawData = result.data;
+          // Almacenar en caché de sesión
+          try { sessionStorage.setItem(`cached_data_${tabName}`, JSON.stringify(rawData)); } catch(e) {}
+          
           processHoursData(rawData);
           populateProjectFilter();
           document.getElementById('filterBar').classList.remove('hidden');
@@ -380,6 +406,13 @@
       } catch (e) {
         contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al obtener la información de horas.</div>`;
       }
+    }
+
+    function clearCacheAndReload() {
+      sessionStorage.clear();
+      processedRecords = [];
+      rawData = [];
+      location.reload();
     }
 
     function processHoursData(data) {
@@ -426,7 +459,6 @@
           projectName = partsP.slice(1).join('-').trim();
         }
 
-        // ⚠️ CONDICIONAL: SI NO TIENE ID DE PROYECTO O ES 'SIN_ID', SE IGNORA Y NO SE MUESTRA
         if (!projectId || projectId === '' || projectId === 'SIN_ID' || projectId.toLowerCase() === 'undefined') {
           return;
         }
@@ -961,6 +993,7 @@
     }
 
     function logout() {
+      sessionStorage.clear();
       location.reload();
     }
   </script>
