@@ -408,12 +408,29 @@
       }
     }
 
-    function clearCacheAndReload() {
-      sessionStorage.clear();
-      processedRecords = [];
-      rawData = [];
-      location.reload();
-    }
+    // Refrescar datos conservando la sesión del usuario
+async function clearCacheAndReload() {
+  const btn = event.currentTarget;
+  const originalText = btn.innerHTML;
+  btn.innerHTML = `<span>⏳ Actualizando...</span>`;
+  btn.disabled = true;
+
+  // 1. Limpiar caché en memoria y sesión
+  sessionStorage.clear();
+  processedRecords = [];
+  rawData = [];
+
+  // 2. Volver a solicitar los datos a Google Apps Script de forma transparente
+  try {
+    const tabToLoad = activeModule === 'hours' ? '[Controls]-Daily hour allocation' : '[Controls]-Daily hour allocation';
+    await loadHoursData(tabToLoad);
+  } catch (err) {
+    console.error("Error al refrescar datos:", err);
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+}
 
     function processHoursData(data) {
       processedRecords = [];
