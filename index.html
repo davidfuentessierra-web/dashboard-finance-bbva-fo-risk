@@ -107,7 +107,7 @@
       <div id="kpiContainer" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 hidden">
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
           <p id="kpiLabel1" class="text-xs font-bold text-slate-400 uppercase">Total Horas Imputadas</p>
-          <h3 id="kpiVal1" class="text-2xl font-bold text-blue-600 mt-1">0 h</h3>
+          <h3 id="kpiVal1" class="text-2xl font-bold text-blue-600 mt-1">0,00 h</h3>
         </div>
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
           <p id="kpiLabel2" class="text-xs font-bold text-slate-400 uppercase">Proyectos Activos</p>
@@ -144,9 +144,10 @@
     let filteredRecords = [];
     let selectedProjects = [];
     let employeeCosts = {};
-    let projectMargins = {}; // Almacena el % de margen por ID de Proyecto { "PC2027-00111": 20 }
+    let projectMargins = {};
     let activeModule = 'hours';
 
+    // Formateador numérico en español con separador de miles
     function formatNumber(val, decimals = 2) {
       const num = parseFloat(val) || 0;
       return new Intl.NumberFormat('es-ES', {
@@ -180,7 +181,6 @@
       localStorage.setItem('project_margins_data', JSON.stringify(projectMargins));
       showSaveAlert(`saved_alert_m_${btoa(unescape(encodeURIComponent(projId))).replace(/=/g, '')}`);
       
-      // Recalcular la vista actual de costes
       if (activeModule === 'project_costs') {
         renderProjectCostsTable(filteredRecords);
       }
@@ -399,7 +399,10 @@
         const rawEmpleado = String(row[empKey] || '').trim();
         const rawFecha = row[dateKey];
         const rawProyecto = String(row[projKey] || '').trim();
-        const rawHoras = parseFloat(row[hourKey]) || 0;
+        
+        // Parsear float asegurando que comas españolas se conviertan a punto
+        let strVal = String(row[hourKey] || '0').replace(',', '.');
+        const rawHoras = parseFloat(strVal) || 0;
 
         if (!rawEmpleado || rawEmpleado === '' || rawEmpleado.toLowerCase() === 'undefined') return;
 
@@ -562,12 +565,11 @@
       }
     }
 
-    // TABLA 1: CONTROL DE HORAS
+    // TABLA 1: CONTROL DE HORAS (2 DECIMALES EN HORAS)
     function renderHierarchicalTable(data) {
       document.getElementById('kpiCostContainer').classList.add('hidden');
       document.getElementById('kpiRecognizedContainer').classList.add('hidden');
       
-      // Ajustar layout de KPIs a 3 columnas
       const kpiContainer = document.getElementById('kpiContainer');
       kpiContainer.className = "grid grid-cols-1 md:grid-cols-3 gap-6 mb-6";
 
@@ -575,7 +577,7 @@
       
       if (data.length === 0) {
         contentArea.innerHTML = '<div class="p-8 bg-white rounded-xl border text-center text-slate-500">No se encontraron registros con los filtros seleccionados.</div>';
-        document.getElementById('kpiVal1').textContent = '0 h';
+        document.getElementById('kpiVal1').textContent = '0,00 h';
         document.getElementById('kpiVal2').textContent = '0';
         document.getElementById('kpiVal3').textContent = '0';
         return;
@@ -613,7 +615,7 @@
       });
 
       document.getElementById('kpiLabel1').textContent = "Total Horas Imputadas";
-      document.getElementById('kpiVal1').textContent = `${formatNumber(totalHoursSum, 1)} h`;
+      document.getElementById('kpiVal1').textContent = `${formatNumber(totalHoursSum, 2)} h`;
       document.getElementById('kpiLabel2').textContent = "Proyectos Activos";
       document.getElementById('kpiVal2').textContent = formatNumber(Object.keys(projectsGroup).length, 0);
       document.getElementById('kpiLabel3').textContent = "Empleados Imputando";
@@ -648,7 +650,7 @@
             <td class="px-6 py-4 text-center text-sm text-slate-600">
               <span class="px-2.5 py-1 bg-slate-100 rounded-full text-xs font-bold text-slate-700">${empleadosList.length} pers.</span>
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">${formatNumber(proj.totalHoras, 1)} h</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">${formatNumber(proj.totalHoras, 2)} h</td>
           </tr>
 
           <tr id="${projRowId}" class="hidden bg-slate-50 border-b border-slate-200">
@@ -671,7 +673,7 @@
             <tr class="hover:bg-slate-50 transition cursor-pointer" onclick="event.stopPropagation(); toggleRow('${empRowId}')">
               <td class="px-3 py-2 text-center text-blue-600 font-bold"><span id="icon_${empRowId}">＋</span></td>
               <td class="px-4 py-2 text-sm font-medium text-slate-800">${emp.empleado}</td>
-              <td class="px-4 py-2 text-sm text-right font-bold text-slate-700">${formatNumber(emp.horasEmpleado, 1)} h</td>
+              <td class="px-4 py-2 text-sm text-right font-bold text-slate-700">${formatNumber(emp.horasEmpleado, 2)} h</td>
             </tr>
             <tr id="${empRowId}" class="hidden bg-blue-50/30">
               <td colspan="3" class="px-6 py-3">
@@ -690,7 +692,7 @@
             html += `
               <tr>
                 <td class="py-1.5 text-slate-600">${d.fechaFormateada}</td>
-                <td class="py-1.5 text-right font-semibold text-slate-800">${formatNumber(d.horas, 1)} h</td>
+                <td class="py-1.5 text-right font-semibold text-slate-800">${formatNumber(d.horas, 2)} h</td>
               </tr>`;
           });
 
@@ -704,12 +706,11 @@
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO (CON MARGEN Y TOTAL A RECONOCER)
+    // TABLA 2: COSTE POR PROYECTO (2 DECIMALES EN HORAS)
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
       document.getElementById('kpiRecognizedContainer').classList.remove('hidden');
       
-      // Ajustar layout de KPIs a 5 columnas
       const kpiContainer = document.getElementById('kpiContainer');
       kpiContainer.className = "grid grid-cols-1 md:grid-cols-5 gap-4 mb-6";
 
@@ -763,7 +764,6 @@
         empMap[r.empleado].dias.push(r);
       });
 
-      // Calcular acumulado de lo reconocido para los proyectos filtrados
       Object.keys(projectsGroup).forEach(projKey => {
         const proj = projectsGroup[projKey];
         const marginPct = projectMargins[proj.projectId] !== undefined ? projectMargins[proj.projectId] : 0;
@@ -779,7 +779,7 @@
       });
 
       document.getElementById('kpiLabel1').textContent = "Total Horas";
-      document.getElementById('kpiVal1').textContent = `${formatNumber(grandTotalHours, 1)} h`;
+      document.getElementById('kpiVal1').textContent = `${formatNumber(grandTotalHours, 2)} h`;
       document.getElementById('kpiLabel2').textContent = "Proyectos";
       document.getElementById('kpiVal2').textContent = formatNumber(Object.keys(projectsGroup).length, 0);
       document.getElementById('kpiLabel3').textContent = "Empleados";
@@ -830,7 +830,7 @@
             <td class="px-4 py-4 whitespace-nowrap text-sm font-bold text-slate-800">${proj.projectId}</td>
             <td class="px-4 py-4 text-sm font-semibold text-slate-700">${proj.projectName}</td>
             <td class="px-4 py-4 text-right text-sm font-bold text-slate-600">${formatNumber(costeMedioHora, 2)} €/h</td>
-            <td class="px-4 py-4 text-right text-sm font-semibold text-slate-700">${formatNumber(proj.totalHoras, 1)} h</td>
+            <td class="px-4 py-4 text-right text-sm font-semibold text-slate-700">${formatNumber(proj.totalHoras, 2)} h</td>
             <td class="px-4 py-4 text-right text-sm font-bold text-emerald-600">${formatNumber(proj.totalCoste, 2)} €</td>
             <td class="px-4 py-4 text-center text-sm" onclick="event.stopPropagation()">
               <div class="flex items-center justify-center gap-1">
@@ -864,7 +864,7 @@
             <tr class="hover:bg-slate-50 transition">
               <td class="px-4 py-2 text-sm font-medium text-slate-800">${emp.empleado}</td>
               <td class="px-4 py-2 text-sm text-right font-semibold text-slate-600">${formatNumber(emp.costeHora, 2)} €/h</td>
-              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-700">${formatNumber(emp.horasEmpleado, 1)} h</td>
+              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-700">${formatNumber(emp.horasEmpleado, 2)} h</td>
               <td class="px-4 py-2 text-sm text-right font-bold text-emerald-600">${formatNumber(emp.costeTotalEmp, 2)} €</td>
             </tr>`;
         });
