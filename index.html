@@ -147,7 +147,6 @@
     let projectMargins = {};
     let activeModule = 'hours';
 
-    // Formateador numérico en español con separador de miles
     function formatNumber(val, decimals = 2) {
       const num = parseFloat(val) || 0;
       return new Intl.NumberFormat('es-ES', {
@@ -400,7 +399,6 @@
         const rawFecha = row[dateKey];
         const rawProyecto = String(row[projKey] || '').trim();
         
-        // Parsear float asegurando que comas españolas se conviertan a punto
         let strVal = String(row[hourKey] || '0').replace(',', '.');
         const rawHoras = parseFloat(strVal) || 0;
 
@@ -415,7 +413,7 @@
           empleado = `${parts[0].trim()}, ${parts[1].trim()}`;
         }
 
-        let projectId = 'SIN_ID';
+        let projectId = '';
         let projectName = rawProyecto;
         
         const matchProj = rawProyecto.match(/\[(.*?)\]-(.*)/);
@@ -426,6 +424,11 @@
           const partsP = rawProyecto.split('-');
           projectId = partsP[0].replace(/\[\vert{}\]/g, '').trim();
           projectName = partsP.slice(1).join('-').trim();
+        }
+
+        // ⚠️ CONDICIONAL: SI NO TIENE ID DE PROYECTO O ES 'SIN_ID', SE IGNORA Y NO SE MUESTRA
+        if (!projectId || projectId === '' || projectId === 'SIN_ID' || projectId.toLowerCase() === 'undefined') {
+          return;
         }
 
         let year = 0, month = 0, day = 0;
@@ -565,7 +568,7 @@
       }
     }
 
-    // TABLA 1: CONTROL DE HORAS (2 DECIMALES EN HORAS)
+    // TABLA 1: CONTROL DE HORAS
     function renderHierarchicalTable(data) {
       document.getElementById('kpiCostContainer').classList.add('hidden');
       document.getElementById('kpiRecognizedContainer').classList.add('hidden');
@@ -706,7 +709,7 @@
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO (2 DECIMALES EN HORAS)
+    // TABLA 2: COSTE POR PROYECTO
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
       document.getElementById('kpiRecognizedContainer').classList.remove('hidden');
