@@ -146,10 +146,13 @@
     let processedRecords = [];
     let filteredRecords = [];
     let selectedProjects = [];
-    let manualEmployeeCosts = {}; // Tarifas manuales sobrescritas por el usuario
-    let calculatedEmployeeRates = {}; // Tarifas calculadas automáticamente { "Empleado_YYYY-MM": rate }
-    let allAvailableMonths = []; // Lista de periodos YYYY-MM disponibles
-    let selectedCostMonth = ""; // Mes seleccionado en pantalla de costes
+    let manualEmployeeCosts = {};
+    let extractFinancialRaw = [];
+    let calculatedEmployeeRates = {}; // { "Empleado_YYYY-MM": rate }
+    let allAvailableMonths = [];
+    let selectedCostMonth = "";
+    let selectedCostProject = "ALL";
+    let empSearchTerm = "";
     let projectMargins = {};
     let activeModule = 'hours';
 
@@ -185,6 +188,9 @@
       
       localStorage.setItem('employee_costs_data', JSON.stringify(manualEmployeeCosts));
       showSaveAlert(`saved_alert_${btoa(unescape(encodeURIComponent(key))).replace(/=/g, '')}`);
+      
+      // Actualizar etiqueta del estado
+      renderCostsScreen();
     }
 
     function saveProjectMargin(projId, value) {
@@ -206,7 +212,6 @@
       }
     }
 
-    // Obtener la tarifa aplicable (Manual si existe, si no la Calculada Automática)
     function getApplicableRate(empName, monthKey) {
       const key = `${empName}_${monthKey}`;
       if (manualEmployeeCosts[key] !== undefined && manualEmployeeCosts[key] !== null) {
@@ -371,10 +376,10 @@
       }
     }
 
-    // CARGA DE DATOS DESDE PESTAÑA Extract_financial_kpi_consolidated PARA EXTRAER TARIFAS AUTOMÁTICAS
+    // CARGA Y PROCESAMIENTO MÁS ROBUSTO DE Extract_financial_kpi_consolidated
     async function loadExtractFinancialData() {
       document.getElementById('currentTabTitle').textContent = "Coste Empleados";
-      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias por profesional (Autocalculadas desde Extract_financial_kpi_consolidated)";
+      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias autocalculadas desde origen y personalización manual";
       document.getElementById('filterBar').classList.add('hidden');
       document.getElementById('kpiContainer').classList.add('hidden');
 
@@ -383,30 +388,32 @@
       const cachedData = sessionStorage.getItem('cached_data_Extract_financial_kpi_consolidated');
       if (cachedData) {
         try {
-          processExtractFinancialRates(JSON.parse(cachedData));
+          extractFinancialRaw = JSON.parse(cachedData);
+          processExtractFinancialRates(extractFinancialRaw);
           renderCostsScreen();
           return;
         } catch(e) {}
       }
 
-      contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Procesando tarifas desde Extract_financial_kpi_consolidated...</div>';
+      contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Cargando fuente de datos Extract_financial_kpi_consolidated...</div>';
 
       try {
         const result = await apiCall({ action: "getData", sheet: "Extract_financial_kpi_consolidated" });
 
         if (result.success && result.data) {
-          try { sessionStorage.setItem('cached_data_Extract_financial_kpi_consolidated', JSON.stringify(result.data)); } catch(e) {}
-          processExtractFinancialRates(result.data);
+          extractFinancialRaw = result.data;
+          try { sessionStorage.setItem('cached_data_Extract_financial_kpi_consolidated', JSON.stringify(extractFinancialRaw)); } catch(e) {}
+          processExtractFinancialRates(extractFinancialRaw);
           renderCostsScreen();
         } else {
-          contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">No se pudo cargar 'Extract_financial_kpi_consolidated': ${result.message}</div>`;
+          contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">No se pudo obtener la hoja: ${result.message}</div>`;
         }
       } catch (e) {
-        contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al obtener información de Extract_financial_kpi_consolidated.</div>`;
+        contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al obtener la información de Extract_financial_kpi_consolidated.</div>`;
       }
     }
 
-    // ALGORITMO DE CÁLCULO DE TARIFAS POR EMPLEADO / AÑO-MES
+    // EXTRAER LAS TARIFAS EXACTAS DE FORMA COMPLETA Y SIN CASOS OMISO
     function processExtractFinancialRates(data) {
       calculatedEmployeeRates = {};
       const empMonthHours = {};
@@ -414,15 +421,22 @@
       const monthsSet = new Set();
 
       data.forEach(row => {
-        const skpicode = String(row['skpicode'] || '').trim();
-        const empName = String(row['skpiitemconcept'] || '').trim();
-        const rawAmount = String(row['dkpiamounteur'] || '0').replace(',', '.');
+        // Mapear campos tolerando posibles minúsculas o espacios
+        const keys = Object.keys(row);
+        const codeKey = keys.find(k => k.toLowerCase() === 'skpicode') || 'skpicode';
+        const empKey = keys.find(k => k.toLowerCase() === 'skpiitemconcept') || 'skpiitemconcept';
+        const amountKey = keys.find(k => k.toLowerCase() === 'dkpiamounteur') || 'dkpiamounteur';
+        const dateKey = keys.find(k => k.toLowerCase().includes('date')) || 'dtallocationdate';
+
+        const skpicode = String(row[codeKey] || '').trim();
+        const empName = String(row[empKey] || '').trim();
+        const rawAmount = String(row[amountKey] || '0').replace(',', '.');
         const amount = parseFloat(rawAmount) || 0;
-        const rawDate = row['dtallocationdate'] || row['dtrevenuedate'];
+        const rawDate = row[dateKey];
 
         if (!empName || empName === '' || empName.toLowerCase() === 'undefined') return;
 
-        // Formatear Fecha a YYYY-MM
+        // Formateo estandarizado de Fecha YYYY-MM
         let monthKey = "2026-01";
         if (rawDate) {
           const strD = String(rawDate);
@@ -445,7 +459,7 @@
         }
       });
 
-      // Calcular Tarifas Horarias
+      // Cálculo exacto: Coste / Horas
       Object.keys(empMonthHours).forEach(comboKey => {
         const hours = empMonthHours[comboKey] || 0;
         const cost = empMonthCosts[comboKey] || 0;
@@ -456,7 +470,7 @@
 
       allAvailableMonths = Array.from(monthsSet).sort().reverse();
       if (!selectedCostMonth && allAvailableMonths.length > 0) {
-        selectedCostMonth = allAvailableMonths[0]; // Por defecto el periodo más reciente
+        selectedCostMonth = allAvailableMonths[0];
       }
     }
 
@@ -469,14 +483,15 @@
         document.getElementById('currentTabSubtitle').textContent = "Análisis de costes medios por proyecto, margen e importes a reconocer";
       }
 
-      // Cargar también Extract_financial_kpi_consolidated en segundo plano si no está en memoria
       if (Object.keys(calculatedEmployeeRates).length === 0) {
         const cachedExtract = sessionStorage.getItem('cached_data_Extract_financial_kpi_consolidated');
         if (cachedExtract) {
-          processExtractFinancialRates(JSON.parse(cachedExtract));
+          extractFinancialRaw = JSON.parse(cachedExtract);
+          processExtractFinancialRates(extractFinancialRaw);
         } else {
           apiCall({ action: "getData", sheet: "Extract_financial_kpi_consolidated" }).then(res => {
             if (res.success && res.data) {
+              extractFinancialRaw = res.data;
               try { sessionStorage.setItem('cached_data_Extract_financial_kpi_consolidated', JSON.stringify(res.data)); } catch(e) {}
               processExtractFinancialRates(res.data);
             }
@@ -532,6 +547,7 @@
       sessionStorage.clear();
       processedRecords = [];
       rawData = [];
+      extractFinancialRaw = [];
       calculatedEmployeeRates = {};
       location.reload();
     }
@@ -864,7 +880,7 @@
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO (USA TARIFAS AUTOCALCULADAS/MANUALES POR MES)
+    // TABLA 2: COSTE POR PROYECTO
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
       document.getElementById('kpiRecognizedContainer').classList.remove('hidden');
@@ -897,7 +913,6 @@
           };
         }
 
-        // Obtener la tarifa del empleado para ese mes concreto (Manual > Calculada)
         const hourlyRate = getApplicableRate(r.empleado, r.monthKey);
         const recordCost = r.horas * hourlyRate;
 
@@ -913,7 +928,6 @@
           empMap[r.empleado] = {
             empleado: r.empleado,
             horasEmpleado: 0,
-            costeHoraAvg: hourlyRate,
             costeTotalEmp: 0,
             dias: []
           };
@@ -1036,29 +1050,31 @@
       contentArea.innerHTML = html;
     }
 
-    // PANTALLA 3: CONFIGURACIÓN COSTE DE EMPLEADOS CON SELECCIÓN DE PERIODO (Y2026-MM)
+    // PANTALLA 3: CONFIGURACIÓN Y BUSCADOR AVANZADO DE COSTE DE EMPLEADOS
     function renderCostsScreen() {
       document.getElementById('currentTabTitle').textContent = "Coste Empleados";
-      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias autocalculadas y sobrescritura manual";
+      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias autocalculadas desde origen y personalización manual";
       document.getElementById('filterBar').classList.add('hidden');
       document.getElementById('kpiContainer').classList.add('hidden');
 
       const contentArea = document.getElementById('contentArea');
 
-      // Extraer lista de empleados de ambas fuentes
+      // Extraer lista única de proyectos disponibles en Extract_financial_kpi_consolidated
+      const projectsSet = new Set();
+      extractFinancialRaw.forEach(r => {
+        const pName = String(r['projectalias'] || r['sprojectcode'] || '').trim();
+        if (pName) projectsSet.add(pName);
+      });
+      const availableProjects = Array.from(projectsSet).sort();
+
+      // Extraer lista única de empleados
       const extractEmps = Object.keys(calculatedEmployeeRates).map(k => k.split('_')[0]);
       const hoursEmps = processedRecords.map(r => r.empleado);
-      const uniqueEmployees = [...new Set([...extractEmps, ...hoursEmps])].sort();
+      let uniqueEmployees = [...new Set([...extractEmps, ...hoursEmps])].sort();
 
-      if (uniqueEmployees.length === 0) {
-        contentArea.innerHTML = `
-          <div class="bg-white p-8 rounded-xl border border-slate-200 text-center">
-            <p class="text-slate-500 mb-4">No hay datos cargados para calcular tarifas.</p>
-            <button onclick="loadExtractFinancialData()" class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition">
-              Cargar Extract_financial_kpi_consolidated
-            </button>
-          </div>`;
-        return;
+      // Aplicar Filtro por Nombre de Empleado
+      if (empSearchTerm) {
+        uniqueEmployees = uniqueEmployees.filter(e => e.toLowerCase().includes(empSearchTerm.toLowerCase()));
       }
 
       let monthOptions = "";
@@ -1067,19 +1083,44 @@
         monthOptions += `<option value="${m}" ${isSelected}>Periodo ${m}</option>`;
       });
 
+      let projectOptions = `<option value="ALL">Todos los Proyectos</option>`;
+      availableProjects.forEach(p => {
+        const isSelected = p === selectedCostProject ? 'selected' : '';
+        projectOptions += `<option value="${p}" ${isSelected}>${p}</option>`;
+      });
+
       let html = `
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div class="p-5 border-b border-slate-100 flex flex-wrap justify-between items-center bg-slate-50 gap-4">
-            <div>
-              <h3 class="font-bold text-slate-800">Tarifas por Empleado (€/hora)</h3>
-              <p class="text-xs text-slate-500">Muestra la tarifa calculada por la app y permite definir un precio manual</p>
+          <!-- BARRA SUPERIOR DE FILTROS ESPECÍFICA -->
+          <div class="p-5 border-b border-slate-100 bg-slate-50 space-y-4">
+            <div class="flex flex-wrap justify-between items-center gap-4">
+              <div>
+                <h3 class="font-bold text-slate-800">Tarifas por Empleado (€/hora)</h3>
+                <p class="text-xs text-slate-500">Muestra la tarifa calculada por la fuente oficial (Costes/Horas) y permite sobrescribir un precio manual</p>
+              </div>
             </div>
-            
-            <div class="flex items-center gap-3">
-              <label class="text-xs font-bold text-slate-500 uppercase">Periodo Mensual:</label>
-              <select onchange="selectedCostMonth=this.value; renderCostsScreen();" class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500">
-                ${monthOptions}
-              </select>
+
+            <!-- FILTROS DE BÚSQUEDA RÁPIDA -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-200">
+              <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Buscar Persona / Empleado</label>
+                <input type="text" value="${empSearchTerm}" onkeyup="empSearchTerm=this.value; renderCostsScreen();" placeholder="Escribe un nombre..." 
+                  class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500">
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Filtrar por Proyecto (Origen)</label>
+                <select onchange="selectedCostProject=this.value; renderCostsScreen();" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500">
+                  ${projectOptions}
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Periodo Mensual</label>
+                <select onchange="selectedCostMonth=this.value; renderCostsScreen();" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500">
+                  ${monthOptions}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1088,14 +1129,30 @@
               <thead class="bg-slate-50">
                 <tr>
                   <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nombre Empleado</th>
-                  <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Tarifa Calculada (${selectedCostMonth})</th>
+                  <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">
+                    Tarifa Calculada (${selectedCostMonth})
+                    <span class="block text-[10px] font-normal text-slate-400 normal-case">(skpicode: 20_fulltimecost / 24_costhours)</span>
+                  </th>
                   <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase pl-8">Tarifa Manual (€/h)</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Estado / Tipo Usado</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Origen de Tarifa Aplicada</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-slate-200">`;
 
+      let displayedCount = 0;
+
       uniqueEmployees.forEach(emp => {
+        // Si hay un filtro de proyecto seleccionado, verificar si el empleado pertenece
+        if (selectedCostProject !== 'ALL') {
+          const hasProject = extractFinancialRaw.some(r => {
+            const pName = String(r['projectalias'] || r['sprojectcode'] || '').trim();
+            const eName = String(r['skpiitemconcept'] || '').trim();
+            return pName === selectedCostProject && eName === emp;
+          });
+          if (!hasProject) return;
+        }
+
+        displayedCount++;
         const comboKey = `${emp}_${selectedCostMonth}`;
         const autoRate = calculatedEmployeeRates[comboKey] || 0;
         const manualRate = manualEmployeeCosts[comboKey] !== undefined ? manualEmployeeCosts[comboKey] : '';
@@ -1106,8 +1163,8 @@
         html += `
           <tr class="hover:bg-slate-50 transition">
             <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">${emp}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-500">
-              ${autoRate > 0 ? formatNumber(autoRate, 2) + ' €/h' : '<span class="text-slate-300 font-normal">Sin datos</span>'}
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-600">
+              ${autoRate > 0 ? formatNumber(autoRate, 2) + ' €/h' : '<span class="text-slate-300 font-normal">Sin datos en periodo</span>'}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm pl-8">
               <div class="flex items-center gap-2">
@@ -1119,8 +1176,8 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-xs">
               ${isManualActive ? 
-                `<span class="px-2 py-1 bg-amber-100 text-amber-800 rounded font-bold">⚠️ Manual (${formatNumber(manualRate, 2)} €)</span>` : 
-                `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded font-bold">🤖 Automática (${formatNumber(autoRate, 2)} €)</span>`
+                `<span class="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full font-bold">✏️ Tarifa Manual (${formatNumber(manualRate, 2)} €)</span>` : 
+                `<span class="px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full font-bold">📊 Calculada del Excel (${formatNumber(autoRate, 2)} €)</span>`
               }
               <span id="saved_alert_${safeKey}" class="ml-2 text-emerald-600 font-bold transition-opacity duration-300 opacity-0">
                 ✓ Guardado
@@ -1128,6 +1185,10 @@
             </td>
           </tr>`;
       });
+
+      if (displayedCount === 0) {
+        html += `<tr><td colspan="4" class="p-8 text-center text-slate-400">No se encontraron empleados con los filtros aplicados.</td></tr>`;
+      }
 
       html += `</tbody></table></div></div>`;
       contentArea.innerHTML = html;
