@@ -76,7 +76,7 @@
         </button>
       </header>
 
-      <!-- BARRA DE FILTROS -->
+      <!-- BARRA DE FILTROS (CONTROL DE HORAS & COSTE PROYECTO) -->
       <div id="filterBar" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6 hidden">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
@@ -146,7 +146,10 @@
     let processedRecords = [];
     let filteredRecords = [];
     let selectedProjects = [];
-    let employeeCosts = {};
+    let manualEmployeeCosts = {}; // Tarifas manuales sobrescritas por el usuario
+    let calculatedEmployeeRates = {}; // Tarifas calculadas automáticamente { "Empleado_YYYY-MM": rate }
+    let allAvailableMonths = []; // Lista de periodos YYYY-MM disponibles
+    let selectedCostMonth = ""; // Mes seleccionado en pantalla de costes
     let projectMargins = {};
     let activeModule = 'hours';
 
@@ -162,7 +165,7 @@
     function loadSavedCostsAndMargins() {
       const savedCosts = localStorage.getItem('employee_costs_data');
       if (savedCosts) {
-        try { employeeCosts = JSON.parse(savedCosts); } catch(e) {}
+        try { manualEmployeeCosts = JSON.parse(savedCosts); } catch(e) {}
       }
       const savedMargins = localStorage.getItem('project_margins_data');
       if (savedMargins) {
@@ -170,11 +173,18 @@
       }
     }
 
-    function saveEmployeeCost(empName, value) {
-      const numValue = parseFloat(value) || 0;
-      employeeCosts[empName] = numValue;
-      localStorage.setItem('employee_costs_data', JSON.stringify(employeeCosts));
-      showSaveAlert(`saved_alert_${btoa(unescape(encodeURIComponent(empName))).replace(/=/g, '')}`);
+    function saveEmployeeCost(empName, monthKey, value) {
+      const numValue = parseFloat(value);
+      const key = `${empName}_${monthKey}`;
+      
+      if (isNaN(numValue) || value === "") {
+        delete manualEmployeeCosts[key];
+      } else {
+        manualEmployeeCosts[key] = numValue;
+      }
+      
+      localStorage.setItem('employee_costs_data', JSON.stringify(manualEmployeeCosts));
+      showSaveAlert(`saved_alert_${btoa(unescape(encodeURIComponent(key))).replace(/=/g, '')}`);
     }
 
     function saveProjectMargin(projId, value) {
@@ -194,6 +204,15 @@
         alertEl.classList.remove('opacity-0');
         setTimeout(() => alertEl.classList.add('opacity-0'), 2000);
       }
+    }
+
+    // Obtener la tarifa aplicable (Manual si existe, si no la Calculada Automática)
+    function getApplicableRate(empName, monthKey) {
+      const key = `${empName}_${monthKey}`;
+      if (manualEmployeeCosts[key] !== undefined && manualEmployeeCosts[key] !== null) {
+        return manualEmployeeCosts[key];
+      }
+      return calculatedEmployeeRates[key] || 0;
     }
 
     function apiCall(params, retries = 2) {
@@ -332,7 +351,7 @@
           btn.onclick = () => { activeModule = 'project_costs'; loadHoursData('[Controls]-Daily hour allocation'); };
         } else if (tab === 'Costes' || tab.toLowerCase().includes('empleado')) {
           btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Coste Empleados`;
-          btn.onclick = () => { activeModule = 'employee_costs'; renderCostsScreen(); };
+          btn.onclick = () => { activeModule = 'employee_costs'; loadExtractFinancialData(); };
         } else {
           btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-400"></span> ${tab}`;
           btn.onclick = () => { activeModule = 'hours'; loadHoursData(tab); };
@@ -344,7 +363,7 @@
       if (allowedTabs.length > 0) {
         if (allowedTabs[0] === 'Costes') {
           activeModule = 'employee_costs';
-          renderCostsScreen();
+          loadExtractFinancialData();
         } else {
           activeModule = 'hours';
           loadHoursData(allowedTabs[0]);
@@ -352,7 +371,95 @@
       }
     }
 
-    // CARGA OPTIMIZADA CON CACHÉ DE SESIÓN
+    // CARGA DE DATOS DESDE PESTAÑA Extract_financial_kpi_consolidated PARA EXTRAER TARIFAS AUTOMÁTICAS
+    async function loadExtractFinancialData() {
+      document.getElementById('currentTabTitle').textContent = "Coste Empleados";
+      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias por profesional (Autocalculadas desde Extract_financial_kpi_consolidated)";
+      document.getElementById('filterBar').classList.add('hidden');
+      document.getElementById('kpiContainer').classList.add('hidden');
+
+      const contentArea = document.getElementById('contentArea');
+      
+      const cachedData = sessionStorage.getItem('cached_data_Extract_financial_kpi_consolidated');
+      if (cachedData) {
+        try {
+          processExtractFinancialRates(JSON.parse(cachedData));
+          renderCostsScreen();
+          return;
+        } catch(e) {}
+      }
+
+      contentArea.innerHTML = '<div class="p-8 text-center text-slate-500">Procesando tarifas desde Extract_financial_kpi_consolidated...</div>';
+
+      try {
+        const result = await apiCall({ action: "getData", sheet: "Extract_financial_kpi_consolidated" });
+
+        if (result.success && result.data) {
+          try { sessionStorage.setItem('cached_data_Extract_financial_kpi_consolidated', JSON.stringify(result.data)); } catch(e) {}
+          processExtractFinancialRates(result.data);
+          renderCostsScreen();
+        } else {
+          contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">No se pudo cargar 'Extract_financial_kpi_consolidated': ${result.message}</div>`;
+        }
+      } catch (e) {
+        contentArea.innerHTML = `<div class="p-4 bg-red-50 text-red-600 rounded-lg border border-red-200">Error al obtener información de Extract_financial_kpi_consolidated.</div>`;
+      }
+    }
+
+    // ALGORITMO DE CÁLCULO DE TARIFAS POR EMPLEADO / AÑO-MES
+    function processExtractFinancialRates(data) {
+      calculatedEmployeeRates = {};
+      const empMonthHours = {};
+      const empMonthCosts = {};
+      const monthsSet = new Set();
+
+      data.forEach(row => {
+        const skpicode = String(row['skpicode'] || '').trim();
+        const empName = String(row['skpiitemconcept'] || '').trim();
+        const rawAmount = String(row['dkpiamounteur'] || '0').replace(',', '.');
+        const amount = parseFloat(rawAmount) || 0;
+        const rawDate = row['dtallocationdate'] || row['dtrevenuedate'];
+
+        if (!empName || empName === '' || empName.toLowerCase() === 'undefined') return;
+
+        // Formatear Fecha a YYYY-MM
+        let monthKey = "2026-01";
+        if (rawDate) {
+          const strD = String(rawDate);
+          if (strD.includes('/')) {
+            const p = strD.split('/');
+            if (p.length === 3) monthKey = `${p[2].substring(0,4)}-${String(p[1]).padStart(2,'0')}`;
+          } else if (strD.includes('-')) {
+            const p = strD.split('-');
+            if (p.length >= 2) monthKey = `${p[0]}-${String(p[1]).padStart(2,'0')}`;
+          }
+        }
+
+        monthsSet.add(monthKey);
+        const comboKey = `${empName}_${monthKey}`;
+
+        if (skpicode === '24_costhours') {
+          empMonthHours[comboKey] = (empMonthHours[comboKey] || 0) + amount;
+        } else if (skpicode === '20_fulltimecost') {
+          empMonthCosts[comboKey] = (empMonthCosts[comboKey] || 0) + amount;
+        }
+      });
+
+      // Calcular Tarifas Horarias
+      Object.keys(empMonthHours).forEach(comboKey => {
+        const hours = empMonthHours[comboKey] || 0;
+        const cost = empMonthCosts[comboKey] || 0;
+        if (hours > 0) {
+          calculatedEmployeeRates[comboKey] = cost / hours;
+        }
+      });
+
+      allAvailableMonths = Array.from(monthsSet).sort().reverse();
+      if (!selectedCostMonth && allAvailableMonths.length > 0) {
+        selectedCostMonth = allAvailableMonths[0]; // Por defecto el periodo más reciente
+      }
+    }
+
     async function loadHoursData(tabName) {
       if (activeModule === 'hours') {
         document.getElementById('currentTabTitle').textContent = "Control de Horas";
@@ -362,7 +469,21 @@
         document.getElementById('currentTabSubtitle').textContent = "Análisis de costes medios por proyecto, margen e importes a reconocer";
       }
 
-      // Si los datos ya están procesados en memoria o en caché de sesión, los reutilizamos instantáneamente
+      // Cargar también Extract_financial_kpi_consolidated en segundo plano si no está en memoria
+      if (Object.keys(calculatedEmployeeRates).length === 0) {
+        const cachedExtract = sessionStorage.getItem('cached_data_Extract_financial_kpi_consolidated');
+        if (cachedExtract) {
+          processExtractFinancialRates(JSON.parse(cachedExtract));
+        } else {
+          apiCall({ action: "getData", sheet: "Extract_financial_kpi_consolidated" }).then(res => {
+            if (res.success && res.data) {
+              try { sessionStorage.setItem('cached_data_Extract_financial_kpi_consolidated', JSON.stringify(res.data)); } catch(e) {}
+              processExtractFinancialRates(res.data);
+            }
+          });
+        }
+      }
+
       const cachedData = sessionStorage.getItem(`cached_data_${tabName}`);
       if (processedRecords.length > 0) {
         document.getElementById('filterBar').classList.remove('hidden');
@@ -392,7 +513,6 @@
 
         if (result.success && result.data) {
           rawData = result.data;
-          // Almacenar en caché de sesión
           try { sessionStorage.setItem(`cached_data_${tabName}`, JSON.stringify(rawData)); } catch(e) {}
           
           processHoursData(rawData);
@@ -408,29 +528,13 @@
       }
     }
 
-    // Refrescar datos conservando la sesión del usuario
-async function clearCacheAndReload() {
-  const btn = event.currentTarget;
-  const originalText = btn.innerHTML;
-  btn.innerHTML = `<span>⏳ Actualizando...</span>`;
-  btn.disabled = true;
-
-  // 1. Limpiar caché en memoria y sesión
-  sessionStorage.clear();
-  processedRecords = [];
-  rawData = [];
-
-  // 2. Volver a solicitar los datos a Google Apps Script de forma transparente
-  try {
-    const tabToLoad = activeModule === 'hours' ? '[Controls]-Daily hour allocation' : '[Controls]-Daily hour allocation';
-    await loadHoursData(tabToLoad);
-  } catch (err) {
-    console.error("Error al refrescar datos:", err);
-  } finally {
-    btn.innerHTML = originalText;
-    btn.disabled = false;
-  }
-}
+    function clearCacheAndReload() {
+      sessionStorage.clear();
+      processedRecords = [];
+      rawData = [];
+      calculatedEmployeeRates = {};
+      location.reload();
+    }
 
     function processHoursData(data) {
       processedRecords = [];
@@ -522,6 +626,7 @@ async function clearCacheAndReload() {
         const monthStr = String(month).padStart(2, '0');
         const dateFormatted = `${dayStr}/${monthStr}/${year}`;
         const isoDate = `${year}-${monthStr}-${dayStr}`;
+        const monthKey = `${year}-${monthStr}`;
 
         processedRecords.push({
           empleado,
@@ -530,6 +635,7 @@ async function clearCacheAndReload() {
           horas: rawHoras,
           fechaFormateada: dateFormatted,
           isoDate: isoDate,
+          monthKey: monthKey,
           rawFecha: dateObj || new Date(0)
         });
       });
@@ -758,7 +864,7 @@ async function clearCacheAndReload() {
       contentArea.innerHTML = html;
     }
 
-    // TABLA 2: COSTE POR PROYECTO
+    // TABLA 2: COSTE POR PROYECTO (USA TARIFAS AUTOCALCULADAS/MANUALES POR MES)
     function renderProjectCostsTable(data) {
       document.getElementById('kpiCostContainer').classList.remove('hidden');
       document.getElementById('kpiRecognizedContainer').classList.remove('hidden');
@@ -791,7 +897,8 @@ async function clearCacheAndReload() {
           };
         }
 
-        const hourlyRate = employeeCosts[r.empleado] || 0;
+        // Obtener la tarifa del empleado para ese mes concreto (Manual > Calculada)
+        const hourlyRate = getApplicableRate(r.empleado, r.monthKey);
         const recordCost = r.horas * hourlyRate;
 
         projectsGroup[projKey].totalHoras += r.horas;
@@ -806,7 +913,7 @@ async function clearCacheAndReload() {
           empMap[r.empleado] = {
             empleado: r.empleado,
             horasEmpleado: 0,
-            costeHora: hourlyRate,
+            costeHoraAvg: hourlyRate,
             costeTotalEmp: 0,
             dias: []
           };
@@ -904,7 +1011,7 @@ async function clearCacheAndReload() {
                   <thead class="bg-slate-100">
                     <tr>
                       <th class="px-4 py-2 text-left text-xs font-semibold text-slate-500">Nombre Empleado</th>
-                      <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Tarifa (€/h)</th>
+                      <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Coste Medio Aplicado (€/h)</th>
                       <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Horas en Proyecto</th>
                       <th class="px-4 py-2 text-right text-xs font-semibold text-slate-500">Coste Total Empleado</th>
                     </tr>
@@ -912,10 +1019,11 @@ async function clearCacheAndReload() {
                   <tbody class="divide-y divide-slate-100">`;
 
         empleadosList.forEach((emp) => {
+          const avgRateEmp = emp.horasEmpleado > 0 ? (emp.costeTotalEmp / emp.horasEmpleado) : 0;
           html += `
             <tr class="hover:bg-slate-50 transition">
               <td class="px-4 py-2 text-sm font-medium text-slate-800">${emp.empleado}</td>
-              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-600">${formatNumber(emp.costeHora, 2)} €/h</td>
+              <td class="px-4 py-2 text-sm text-right font-semibold text-slate-600">${formatNumber(avgRateEmp, 2)} €/h</td>
               <td class="px-4 py-2 text-sm text-right font-semibold text-slate-700">${formatNumber(emp.horasEmpleado, 2)} h</td>
               <td class="px-4 py-2 text-sm text-right font-bold text-emerald-600">${formatNumber(emp.costeTotalEmp, 2)} €</td>
             </tr>`;
@@ -928,35 +1036,51 @@ async function clearCacheAndReload() {
       contentArea.innerHTML = html;
     }
 
-    // PANTALLA 3: CONFIGURACIÓN COSTE DE EMPLEADOS
+    // PANTALLA 3: CONFIGURACIÓN COSTE DE EMPLEADOS CON SELECCIÓN DE PERIODO (Y2026-MM)
     function renderCostsScreen() {
       document.getElementById('currentTabTitle').textContent = "Coste Empleados";
-      document.getElementById('currentTabSubtitle').textContent = "Gestión y asignación de tarifas horarias por profesional";
+      document.getElementById('currentTabSubtitle').textContent = "Gestión de tarifas horarias autocalculadas y sobrescritura manual";
       document.getElementById('filterBar').classList.add('hidden');
       document.getElementById('kpiContainer').classList.add('hidden');
 
       const contentArea = document.getElementById('contentArea');
-      const uniqueEmployees = [...new Set(processedRecords.map(r => r.empleado))].sort();
+
+      // Extraer lista de empleados de ambas fuentes
+      const extractEmps = Object.keys(calculatedEmployeeRates).map(k => k.split('_')[0]);
+      const hoursEmps = processedRecords.map(r => r.empleado);
+      const uniqueEmployees = [...new Set([...extractEmps, ...hoursEmps])].sort();
 
       if (uniqueEmployees.length === 0) {
         contentArea.innerHTML = `
           <div class="bg-white p-8 rounded-xl border border-slate-200 text-center">
-            <p class="text-slate-500 mb-4">Primero debes cargar los datos de la pestaña de Control de Horas para extraer la lista de empleados.</p>
-            <button onclick="activeModule='hours'; loadHoursData('[Controls]-Daily hour allocation')" class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition">
-              Cargar Control de Horas
+            <p class="text-slate-500 mb-4">No hay datos cargados para calcular tarifas.</p>
+            <button onclick="loadExtractFinancialData()" class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition">
+              Cargar Extract_financial_kpi_consolidated
             </button>
           </div>`;
         return;
       }
 
+      let monthOptions = "";
+      allAvailableMonths.forEach(m => {
+        const isSelected = m === selectedCostMonth ? 'selected' : '';
+        monthOptions += `<option value="${m}" ${isSelected}>Periodo ${m}</option>`;
+      });
+
       let html = `
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div class="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div class="p-5 border-b border-slate-100 flex flex-wrap justify-between items-center bg-slate-50 gap-4">
             <div>
               <h3 class="font-bold text-slate-800">Tarifas por Empleado (€/hora)</h3>
-              <p class="text-xs text-slate-500">Los costes introducidos se guardan automáticamente</p>
+              <p class="text-xs text-slate-500">Muestra la tarifa calculada por la app y permite definir un precio manual</p>
             </div>
-            <span class="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Modo Edición Manual</span>
+            
+            <div class="flex items-center gap-3">
+              <label class="text-xs font-bold text-slate-500 uppercase">Periodo Mensual:</label>
+              <select onchange="selectedCostMonth=this.value; renderCostsScreen();" class="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500">
+                ${monthOptions}
+              </select>
+            </div>
           </div>
 
           <div class="overflow-x-auto">
@@ -964,29 +1088,41 @@ async function clearCacheAndReload() {
               <thead class="bg-slate-50">
                 <tr>
                   <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Nombre Empleado</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Coste Hora (€/h)</th>
-                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Estado</th>
+                  <th class="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Tarifa Calculada (${selectedCostMonth})</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase pl-8">Tarifa Manual (€/h)</th>
+                  <th class="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Estado / Tipo Usado</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-slate-200">`;
 
       uniqueEmployees.forEach(emp => {
-        const currentCost = employeeCosts[emp] !== undefined ? employeeCosts[emp] : '';
-        const safeId = btoa(unescape(encodeURIComponent(emp))).replace(/=/g, '');
+        const comboKey = `${emp}_${selectedCostMonth}`;
+        const autoRate = calculatedEmployeeRates[comboKey] || 0;
+        const manualRate = manualEmployeeCosts[comboKey] !== undefined ? manualEmployeeCosts[comboKey] : '';
+        const safeKey = btoa(unescape(encodeURIComponent(comboKey))).replace(/=/g, '');
+
+        const isManualActive = manualRate !== '' && manualRate !== null;
 
         html += `
           <tr class="hover:bg-slate-50 transition">
             <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-800">${emp}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm">
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-500">
+              ${autoRate > 0 ? formatNumber(autoRate, 2) + ' €/h' : '<span class="text-slate-300 font-normal">Sin datos</span>'}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm pl-8">
               <div class="flex items-center gap-2">
                 <span class="text-slate-400 font-bold">€</span>
-                <input type="number" step="0.01" value="${currentCost}" placeholder="0.00"
-                  onchange="saveEmployeeCost('${emp.replace(/'/g, "\\'")}', this.value)"
-                  class="w-32 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm text-slate-800 font-bold focus:ring-2 focus:ring-emerald-500 outline-none">
+                <input type="number" step="0.01" value="${manualRate}" placeholder="Auto (${autoRate > 0 ? autoRate.toFixed(2) : '0.00'})"
+                  onchange="saveEmployeeCost('${emp.replace(/'/g, "\\'")}', '${selectedCostMonth}', this.value)"
+                  class="w-36 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none">
               </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-xs">
-              <span id="saved_alert_${safeId}" class="text-emerald-600 font-bold transition-opacity duration-300 opacity-0">
+              ${isManualActive ? 
+                `<span class="px-2 py-1 bg-amber-100 text-amber-800 rounded font-bold">⚠️ Manual (${formatNumber(manualRate, 2)} €)</span>` : 
+                `<span class="px-2 py-1 bg-blue-100 text-blue-800 rounded font-bold">🤖 Automática (${formatNumber(autoRate, 2)} €)</span>`
+              }
+              <span id="saved_alert_${safeKey}" class="ml-2 text-emerald-600 font-bold transition-opacity duration-300 opacity-0">
                 ✓ Guardado
               </span>
             </td>
